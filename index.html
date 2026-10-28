@@ -768,7 +768,7 @@ function drawWorld() {
   const base = 98, bx = BOX_X - cam;
   if (S.phase === 'wake') {
     const wiggle = S.stage === 1 ? Math.round(Math.sin(t * 30) * .8) : S.stage === 2 ? -8 + Math.round(Math.sin(t * 4)) : 0;
-    const peek = [0, 0, 11, 18][Math.min(S.stage, 3)];
+    const peek = [0, 0, 12, 21][Math.min(S.stage, 3)];
     glow(bx, 108, 30, [190, 170, 255], .1 * (1 - L));
     if (S.stage <= 3) { ctx.save(); ctx.beginPath(); ctx.rect(0, 0, W, base + 1); ctx.clip(); cat('cat_sit', bx, base + 40 - peek); ctx.restore(); }
   }
@@ -789,7 +789,7 @@ function drawWorld() {
     if (S.phase === 'wake') {
       const k0 = Math.min(1, (t - S.jump) / .6), k = ease(k0);
       let x = BOX_X + 34 * k, y = 120, pose = 'cat_sit', sx = 1, sy = 1;
-      if (k0 < 1) { y = lerp(base + 22, 120, k) - Math.sin(k0 * Math.PI) * 18; pose = 'cat_pounce'; sy = 1 + Math.sin(k0 * Math.PI) * .08; }
+      if (k0 < 1) { y = lerp(base + 19, 120, k) - Math.sin(k0 * Math.PI) * 18; pose = 'cat_pounce'; sy = 1 + Math.sin(k0 * Math.PI) * .08; }
       const land = t - S.jump - .6;
       if (land > 0 && land < .35) { const q = Math.sin(land / .35 * Math.PI) * .16; sx = 1 + q; sy = 1 - q; }
       if (S.done && t - S.done > 1 && t - S.done < 3.2) {

@@ -17,7 +17,7 @@ Mở file `index.html` bằng trình duyệt (Chrome, Edge, Firefox, Safari) là
 Vào ngày 4/5 có thêm pháo hoa ở màn cuối. Muốn xem trước, mở `index.html#45`.
 
 ## Thay hình của Đụt
-Tất cả khung hình của Đụt nằm chung trong **một sprite sheet**: `sprites/dut_sheet.png`. Mặt được vẽ tay từng pixel (mắt tròn có con ngươi dọc và đốm sáng, mũi tam giác, miệng ㅅ, má hồng), thân tô phẳng 3 tông với viền đậm cho dễ nhìn.
+Tất cả khung hình của Đụt nằm chung trong **một sprite sheet**: `sprites/dut_sheet.png`. Các khung được dựng từ ảnh Đụt pixel bạn vẽ: tư thế ngồi dùng nguyên ảnh gốc, các tư thế khác dùng đúng cái đầu trong ảnh gốc và vẽ thêm thân cùng bảng màu. Các bạn mèo là Đụt đổi bảng màu.
 Mở `sprite_guide.png` (bản phóng to có lưới và nhãn từng ô) để biết ô nào là tư thế nào.
 
 Sheet là lưới ô vuông 40×40 px, 4 cột, 6 hàng:

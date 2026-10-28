@@ -1,0 +1,1305 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Đụt</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --frame: #e9e3d6;
+    color-scheme: light;
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --frame: #0b0a12; color-scheme: dark; }
+  }
+  :root[data-theme="dark"] { --frame: #0b0a12; color-scheme: dark; }
+  html { scroll-padding-top: env(safe-area-inset-top, 0px); }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--frame);
+    display: flex; align-items: center; justify-content: center;
+    overflow: hidden; touch-action: none;
+    -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent;
+  }
+  canvas { display: block; max-width: 100%; image-rendering: pixelated; image-rendering: crisp-edges; }
+  canvas:focus { outline: none; }
+  canvas:focus-visible { outline: 2px solid #f6cc4c; outline-offset: 3px; }
+</style>
+</head>
+<body>
+<canvas id="game" tabindex="0" aria-label="Game Đụt: phím mũi tên để đi, phím cách để nhảy"></canvas>
+<script>
+/* =====================================================================
+   ĐỤT — bản demo
+   ---------------------------------------------------------------------
+   SPRITE SHEET CỦA ĐỤT: sprites/dut_sheet.png, lưới ô vuông SHEET.cell px.
+   Mỗi hàng là một hoạt ảnh; bảng SHEET.anims cho biết hàng, các khung
+   và tốc độ (khung/giây). Muốn thêm khung: vẽ thêm ô vào hàng và thêm
+   số cột vào frames. Xem sprite_guide.png để biết ô nào là gì.
+   ---------------------------------------------------------------------
+   THAY HÌNH: mọi hình của Đụt, hộp giày và bóng là file PNG riêng trong
+   thư mục sprites/. Vẽ hình mới, giữ nguyên tên file là game tự dùng.
+   Hình được co giãn vừa khung trong SPRITE_BOX, neo ở giữa đáy.
+   Đụt quay mặt sang PHẢI; khi đi sang trái game tự lật hình.
+   ===================================================================== */
+const SPRITES = {
+  dut_sheet:     'sprites/dut_sheet.png',      // toàn bộ khung hình của Đụt (xem SHEET bên dưới)
+  friends_sheet: 'sprites/friends_sheet.png',  // các bạn mèo ở màn cuối: mỗi hàng một bạn
+  box_base:      'sprites/box_base.png',       // thân hộp giày
+  box_lid:       'sprites/box_lid.png',        // nắp hộp giày
+  ball_red:      'sprites/ball_red.png',
+  ball_yellow:   'sprites/ball_yellow.png',
+  ball_blue:     'sprites/ball_blue.png',
+  ball_green:    'sprites/ball_green.png',
+  ball_pink:     'sprites/ball_pink.png',
+};
+const SHEET = {
+  cell: 40,
+  anims: {
+    walk:      { row: 0, frames: [0, 1, 2, 3] },                 // chạy theo quãng đường, không theo thời gian
+    sit:       { row: 1, frames: [0, 1, 0, 3, 0, 1, 2, 0], fps: 2.2 },  // ô 2 = chớp mắt
+    lie:       { row: 2, frames: [0, 0, 0, 1, 0, 0], fps: 1.4 },
+    lie_blink: { row: 2, frames: [2, 3], fps: .9 },
+    eat:       { row: 3, frames: [0, 1, 2, 3], fps: 5 },
+    jump_up:   { row: 4, frames: [0] },
+    jump_down: { row: 4, frames: [1] },
+    stretch:   { row: 4, frames: [2] },
+    dazed:     { row: 4, frames: [3] },
+    stand:     { row: 5, frames: [0] },
+  },
+};
+// tên tư thế dùng trong code → hoạt ảnh trong sheet
+const POSE = {
+  cat_walk_1: ['walk', 0], cat_walk_3: ['walk', 1], cat_walk_2: ['walk', 2], cat_walk_4: ['walk', 3],
+  cat_sit: 'sit', cat_sit_blink: ['sit', 2], cat_lie: 'lie', cat_lie_blink: 'lie_blink', cat_eat: 'eat', cat_stand: 'stand',
+  cat_jump: 'jump_up', cat_pounce: 'jump_up', cat_jump_down: 'jump_down', cat_stretch: 'stretch', cat_miss: 'dazed',
+};
+const SPRITE_BOX = { cat: [40, 40], ball: [10, 10], box_base: [40, 22], box_lid: [44, 7] };
+
+/* ---------------- Khung hình ---------------- */
+const W = 256, H = 144;
+const cv = document.getElementById('game');
+cv.width = W; cv.height = H;
+const ctx = cv.getContext('2d');
+ctx.imageSmoothingEnabled = false;
+function resize() {
+  const s = Math.min(innerWidth / W, innerHeight / H);
+  const k = s >= 2 ? Math.floor(s) : s;
+  cv.style.width = W * k + 'px'; cv.style.height = H * k + 'px';
+}
+addEventListener('resize', resize); resize();
+
+const IMG = {};
+function loadSprites() {
+  return Promise.all(Object.entries(SPRITES).map(([k, src]) => new Promise(res => {
+    const im = new Image();
+    im.onload = () => { IMG[k] = im; res(); };
+    im.onerror = () => { console.warn('Không tải được hình', src); res(); };
+    im.src = src;
+  })));
+}
+function drawImg(im, sx0, sy0, sw, sh, cx, bottom, box, opt) {
+  const [bw, bh] = box;
+  const sx = opt.sx ?? (opt.flip ? -1 : 1), sy = opt.sy ?? 1;
+  ctx.save(); ctx.globalAlpha = opt.alpha ?? 1;
+  if (!im) { ctx.fillStyle = '#8a93a8'; ctx.fillRect(Math.round(cx - bw / 2), Math.round(bottom - bh), bw, bh); ctx.restore(); return; }
+  const s = Math.min(bw / sw, bh / sh);
+  const dw = Math.max(1, Math.round(sw * s * Math.abs(sx))), dh = Math.max(1, Math.round(sh * s * sy));
+  const x = Math.round(cx - dw / 2), y = Math.round(bottom - dh);
+  if (sx < 0) { ctx.translate(x + dw, y); ctx.scale(-1, 1); ctx.drawImage(im, sx0, sy0, sw, sh, 0, 0, dw, dh); }
+  else ctx.drawImage(im, sx0, sy0, sw, sh, x, y, dw, dh);
+  ctx.restore();
+}
+// opt.sx / opt.sy: co giãn quanh điểm giữa đáy (sx âm = lật ngang)
+function spr(name, cx, bottom, box, opt = {}) {
+  const im = IMG[name];
+  drawImg(im, 0, 0, im ? im.width : 1, im ? im.height : 1, cx, bottom, box, opt);
+}
+function cat(pose, cx, bottom, opt = {}) {
+  const im = IMG.dut_sheet, m = POSE[pose] || 'stand', S0 = SHEET.cell;
+  let a, f;
+  if (Array.isArray(m)) { a = SHEET.anims[m[0]]; f = m[1]; }   // [hoạt ảnh, cột]
+  else { a = SHEET.anims[m]; const n = a.frames.length; f = a.frames[a.fps ? Math.floor(nowA() * a.fps + (opt.phase || 0)) % n : 0]; }
+  drawImg(im, f * S0, a.row * S0, S0, S0, cx, bottom, SPRITE_BOX.cat, opt);
+}
+/* bóng đổ mềm dưới chân; h = độ cao so với mặt đất */
+function shadow(x, gy, h = 0, a = .22) {
+  const k = clamp(1 - h / 70), w = Math.round(9 * (.55 + .45 * k));
+  ctx.globalAlpha = a * k; ctx.fillStyle = '#1a1028';
+  ctx.fillRect(Math.round(x - w), Math.round(gy) - 1, w * 2, 2);
+  ctx.fillRect(Math.round(x - w + 2), Math.round(gy) - 2, w * 2 - 4, 1);
+  ctx.globalAlpha = 1;
+}
+function groundBelow(lvl, x, y) {
+  let g = null;
+  lvl.solids.forEach(([x0, x1, top]) => { if (x > x0 && x < x1 && top >= y - 1 && (g === null || top < g)) g = top; });
+  lvl.plats.forEach(([x0, x1, top]) => { if (x > x0 && x < x1 && top >= y - 1 && (g === null || top < g)) g = top; });
+  return g;
+}
+const ease = k => k < .5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
+const easeOut = k => 1 - (1 - k) * (1 - k);
+const BALL_NAMES = ['ball_red', 'ball_yellow', 'ball_blue', 'ball_green', 'ball_pink'];
+const BALL_RGB = [[238, 98, 98], [246, 204, 76], [92, 156, 236], [110, 200, 120], [240, 140, 196]];
+
+/* ---------------- Tiện ích vẽ ---------------- */
+const hex = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+const rgb = a => 'rgb(' + a.map(Math.round).join(',') + ')';
+const lerp = (a, b, t) => a + (b - a) * t;
+const clamp = (v, a = 0, b = 1) => Math.max(a, Math.min(b, v));
+function mixA(a, b, t) { t = clamp(t); return a.map((v, i) => v + (b[i] - v) * t); }
+function mix(a, b, t) { return rgb(mixA(hex(a), hex(b), t)); }
+function rect(x, y, w, h, c) { ctx.fillStyle = c; ctx.fillRect(Math.round(x), Math.round(y), w, h); }
+function glow(x, y, r, c, a) { // quầng sáng cộng màu
+  if (a <= 0) return;
+  const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+  g.addColorStop(0, `rgba(${c[0]},${c[1]},${c[2]},${a})`);
+  g.addColorStop(1, `rgba(${c[0]},${c[1]},${c[2]},0)`);
+  ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = g;
+  ctx.fillRect(x - r, y - r, r * 2, r * 2);
+  ctx.globalCompositeOperation = 'source-over';
+}
+function pixRing(cx, cy, r, color, alpha) {
+  ctx.globalAlpha = alpha; ctx.fillStyle = color;
+  const n = Math.max(12, Math.round(r * 6));
+  for (let i = 0; i < n; i++) { const a = i / n * Math.PI * 2; ctx.fillRect(Math.round(cx + Math.cos(a) * r), Math.round(cy + Math.sin(a) * r), 1, 1); }
+  ctx.globalAlpha = 1;
+}
+function paw(x, y, c, a = 1) {
+  ctx.globalAlpha = a;
+  rect(x - 2, y, 5, 3, c); rect(x - 1, y + 3, 3, 1, c);
+  rect(x - 3, y - 2, 1, 2, c); rect(x - 1, y - 3, 1, 2, c); rect(x + 1, y - 3, 1, 2, c); rect(x + 3, y - 2, 1, 2, c);
+  ctx.globalAlpha = 1;
+}
+const HEART = ['.##.##.', '#######', '#######', '.#####.', '..###..', '...#...'];
+function heart(x, y, c, a = 1) {
+  ctx.globalAlpha = a; ctx.fillStyle = c;
+  HEART.forEach((row, j) => [...row].forEach((ch, i) => ch === '#' && ctx.fillRect(x + i - 3, y + j, 1, 1)));
+  ctx.globalAlpha = 1;
+}
+function text(str, x, y, size, color, a = 1) {
+  ctx.globalAlpha = a; ctx.fillStyle = color;
+  ctx.font = size + 'px VT323, "Courier New", monospace';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(str, x, y); ctx.globalAlpha = 1;
+}
+let seed = 1;
+const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+
+/* ---------------- Hạt lấp lánh ---------------- */
+let parts = [];
+function burst(x, y, n, colors, speed = 40, life = .8, g = 40) {
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * Math.PI * 2, v = speed * (.3 + Math.random() * .7);
+    parts.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 10, life, max: life, c: colors[i % colors.length], g });
+  }
+}
+function updateParts(dt) {
+  parts.forEach(p => { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += p.g * dt; p.vx *= .98; p.life -= dt; });
+  parts = parts.filter(p => p.life > 0);
+}
+function drawParts(ox = 0) {
+  parts.forEach(p => { ctx.globalAlpha = clamp(p.life / p.max * 1.5); rect(p.x - ox, p.y, 1, 1, p.c); });
+  ctx.globalAlpha = 1;
+}
+
+/* ---------------- Âm thanh (tự tổng hợp) ---------------- */
+let AC = null, master, noiseBuf;
+function audioInit() {
+  if (AC) { AC.resume(); return; }
+  AC = new (window.AudioContext || window.webkitAudioContext)();
+  master = AC.createGain(); master.gain.value = .6;
+  // tiếng vang nhẹ cho cảm giác không gian huyền ảo
+  const dly = AC.createDelay(), fb = AC.createGain(), wet = AC.createGain(), lp = AC.createBiquadFilter();
+  dly.delayTime.value = .32; fb.gain.value = .32; wet.gain.value = .28; lp.type = 'lowpass'; lp.frequency.value = 2200;
+  master.connect(dly); dly.connect(lp); lp.connect(fb); fb.connect(dly); lp.connect(wet);
+  const comp = AC.createDynamicsCompressor();
+  master.connect(comp); wet.connect(comp); comp.connect(AC.destination);
+  noiseBuf = AC.createBuffer(1, AC.sampleRate * .2, AC.sampleRate);
+  const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+}
+const mtof = m => 440 * Math.pow(2, (m - 69) / 12);
+function tone(m, t, dur, { type = 'triangle', vol = .15, att = .005, cut = 0, glide = 0 } = {}) {
+  const o = AC.createOscillator(), g = AC.createGain();
+  o.type = type; o.frequency.setValueAtTime(mtof(m), t);
+  if (glide) o.frequency.exponentialRampToValueAtTime(mtof(m + glide), t + dur * .6);
+  let n = o;
+  if (cut) { const f = AC.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = cut; o.connect(f); n = f; }
+  n.connect(g); g.connect(master);
+  g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vol, t + att); g.gain.exponentialRampToValueAtTime(.0001, t + dur);
+  o.start(t); o.stop(t + dur + .05);
+}
+function pluck(m, t, v = .2) { tone(m, t, .6, { vol: v }); tone(m + 12, t, .3, { type: 'sine', vol: v * .5 }); tone(m, t, .25, { type: 'square', vol: v * .1, cut: 2200 }); }
+function musicbox(m, t, v = .1) { tone(m + 12, t, 1.5, { type: 'sine', vol: v }); tone(m + 24, t, .5, { type: 'sine', vol: v * .25 }); }
+function thump(t, v = .45) {
+  const o = AC.createOscillator(), g = AC.createGain();
+  o.type = 'sine'; o.frequency.setValueAtTime(110, t); o.frequency.exponentialRampToValueAtTime(45, t + .18);
+  g.gain.setValueAtTime(v, t); g.gain.exponentialRampToValueAtTime(.0001, t + .25);
+  o.connect(g); g.connect(master); o.start(t); o.stop(t + .3);
+}
+function pad(ms, t, dur, v = .035) {
+  ms.forEach(m => {
+    const o = AC.createOscillator(), g = AC.createGain(), f = AC.createBiquadFilter();
+    o.type = 'triangle'; o.frequency.value = mtof(m); o.detune.value = (Math.random() - .5) * 12;
+    f.type = 'lowpass'; f.frequency.value = 1000;
+    o.connect(f); f.connect(g); g.connect(master);
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(v, t + dur * .35); g.gain.linearRampToValueAtTime(0, t + dur);
+    o.start(t); o.stop(t + dur + .05);
+  });
+}
+function meow(t, v = .08) {
+  const o = AC.createOscillator(), g = AC.createGain(), f = AC.createBiquadFilter();
+  o.type = 'sawtooth'; f.type = 'bandpass'; f.frequency.value = 1400; f.Q.value = 3;
+  o.frequency.setValueAtTime(520, t); o.frequency.linearRampToValueAtTime(820, t + .12); o.frequency.linearRampToValueAtTime(480, t + .4);
+  g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(v, t + .05); g.gain.linearRampToValueAtTime(0, t + .42);
+  o.connect(f); f.connect(g); g.connect(master); o.start(t); o.stop(t + .45);
+}
+function sweep(t, dir = 1) {
+  const ns = [67, 69, 72, 74, 76, 79, 81, 84];
+  (dir > 0 ? ns : ns.slice().reverse()).forEach((m, i) => musicbox(m - 12, t + i * .06, .06));
+}
+function sfxJump() { if (AC) tone(70, AC.currentTime, .14, { type: 'sine', vol: .06, glide: 7 }); }
+function sfxLand() { if (AC) thump(AC.currentTime, .08); }
+
+let queue = [];
+const at = (t, fn) => queue.push({ t, fn });
+function runQueue() {
+  if (!AC) return;
+  const lim = AC.currentTime + .15;
+  queue = queue.filter(e => { if (e.t < lim) { e.fn(e.t); return false; } return true; });
+}
+
+const SCALE = [72, 74, 76, 79, 81, 84, 86, 88];
+/* BÀI HÁT CỦA ĐỤT (giai điệu sáng tác riêng cho game, số MIDI: 60 = Đô giữa).
+   Mỗi quả bóng nhặt được phát nốt tiếp theo. 4 câu nhạc:
+   1) mở đầu sáng  2) chùng xuống nhờ nốt La giáng (Fm)  3) Sol thăng (E7) gợi nhớ  4) ấm lại, về Đô */
+const SONG = [76, 79, 84, 83, 81, 76,      // E G C B A E
+              77, 81, 84, 80, 79,          // F A C Ab G
+              76, 79, 80, 83,              // E G G# B
+              81, 84, 86, 83, 79, 77, 76, 74, 72];  // A C D B G F E D C
+const SONG_BEATS = [0, 1, 2, 3, 4, 6, 8, 9, 10, 11, 12, 16, 17, 18, 19, 24, 25, 26, 27, 28, 29, 30, 31, 32];
+// Vòng hợp âm 8 ô nhịp: C – Am – F – Fm – C/G – E7 – Am – G7
+const PROG = [[60, 64, 67], [57, 60, 64], [57, 60, 65], [56, 60, 65], [55, 60, 64], [56, 59, 64], [57, 60, 64], [55, 59, 65]];
+const ROOTS = [48, 45, 41, 41, 43, 40, 45, 43];
+const BEAT = .8;
+
+/* ---------------- Bảng màu ---------------- */
+const VOID = '#07060c';
+const NIGHT = {
+  top: '#1b1640', mid: '#4a3a7c', low: '#e391b0',
+  far: '#6a5596', mid2: '#40357a', near: '#2a2458',
+  grass: '#78d8a8', grassHi: '#d8ffea', grassDk: '#3f9c86', dirt: '#2f2656', dirtDk: '#221b44', crystal: '#9fe8ff',
+  fog: [242, 170, 200], star: '#fff6e0',
+};
+const GOLD = {
+  top: '#4b3a86', mid: '#e0849e', low: '#ffd59a',
+  far: '#c27aa6', mid2: '#9a5d8e', near: '#6e4a7e',
+  grass: '#bcd47a', grassHi: '#fff4b8', grassDk: '#8aa25a', dirt: '#6a4a72', dirtDk: '#57395f', crystal: '#ffe2a8',
+  fog: [255, 210, 170], star: '#fff6e0',
+};
+
+/* ---------------- Thế giới ---------------- */
+const LW = 1320;                  // chiều dài màn
+const SOLIDS = [[0, 262, 120], [300, 470, 112], [520, 640, 120], [640, 760, 104], [810, 962, 120], [1080, LW, 120]];
+const PLATS = [[378, 422, 84], [596, 640, 88], [686, 730, 72], [984, 1016, 108], [1038, 1068, 98]];
+const BALL_POS = [[200, 106], [222, 102], [244, 106], [276, 94], [290, 92], [340, 98], [400, 72], [440, 98],
+  [492, 94], [506, 98], [560, 106], [618, 76], [668, 90], [708, 60], [784, 90], [798, 96],
+  [860, 106], [888, 104], [916, 106], [1000, 96], [1053, 86], [1112, 106], [1140, 102], [1168, 106]];
+const LANTERNS = [[180, 120], [560, 120], [850, 120]];
+const BOX_X = 128, PORTAL_X = 1250;
+const STARS = Array.from({ length: 90 }, () => ({ x: rnd() * W, y: rnd() * 80, p: rnd() * 6, b: rnd() < .15 }));
+const ISLANDS = [[60, 46, 26], [230, 34, 18], [380, 52, 30], [560, 40, 20], [720, 48, 26], [880, 36, 16], [1010, 50, 24]];
+const MOTES = Array.from({ length: 40 }, () => ({ x: rnd() * W, y: rnd() * H, p: rnd() * 6, s: 3 + rnd() * 6, c: rnd() < .5 ? [200, 255, 220] : [255, 220, 240] }));
+// trang trí mọc trên mặt đất (cố định)
+const DECOR = [];
+seed = 42;
+SOLIDS.forEach(([x0, x1, top]) => {
+  for (let x = x0 + 6; x < x1 - 6; x += 5 + Math.floor(rnd() * 8)) {
+    const r = rnd();
+    DECOR.push({ x, y: top, k: r < .35 ? 'grass' : r < .55 ? 'flower' : r < .68 ? 'mush' : r < .8 ? 'catnip' : r < .88 ? 'crystal' : 'grass', p: rnd() * 6, c: Math.floor(rnd() * 5) });
+  }
+});
+const SPECKS = Array.from({ length: 260 }, () => ({ x: rnd() * LW, y: rnd() * 40, c: rnd() }));
+
+function hillLayer(base, amp, f1, f2, off, color, extra) {
+  ctx.fillStyle = color;
+  for (let x = 0; x < W; x++) {
+    const wx = x + off;
+    const y = Math.round(base + Math.sin(wx * f1) * amp + Math.sin(wx * f2 + 1.7) * amp * .5);
+    ctx.fillRect(x, y, 1, H - y);
+    if (extra) extra(x, wx, y);
+  }
+}
+function treeSil(x, y, r, color) { // tán cây tròn
+  ctx.fillStyle = color;
+  for (let j = -r; j <= r; j++) { const w = Math.round(Math.sqrt(r * r - j * j)); ctx.fillRect(Math.round(x - w), Math.round(y + j - r), w * 2, 1); }
+  ctx.fillRect(Math.round(x), Math.round(y), 1, r + 2);
+}
+
+/* Vẽ toàn bộ phông nền. L: độ sáng 0..1, P: bảng màu, cam: vị trí camera */
+function drawBackdrop(P, L, cam, t, opt = {}) {
+  const top = hex(P.top), mid = hex(P.mid), low = hex(P.low), v = hex(VOID);
+  for (let y = 0; y < H; y += 2) {
+    const k = y / 110;
+    const c = k < .55 ? mixA(top, mid, k / .55) : mixA(mid, low, (k - .55) / .45);
+    rect(0, y, W, 2, rgb(mixA(v, c, L)));
+  }
+  // sao
+  const sa = clamp(L * 1.8) * (opt.starA ?? 1);
+  STARS.forEach(s => {
+    const a = sa * (.4 + .6 * (.5 + .5 * Math.sin(t * 2 + s.p)));
+    ctx.globalAlpha = a; rect(((s.x - cam * .02) % W + W) % W, s.y, 1, 1, P.star);
+    if (s.b) { ctx.globalAlpha = a * .5; rect(((s.x - cam * .02) % W + W) % W - 1, s.y, 3, 1, P.star); rect(((s.x - cam * .02) % W + W) % W, s.y - 1, 1, 3, P.star); }
+  });
+  ctx.globalAlpha = 1;
+  // cực quang
+  const aa = clamp((L - .45) * 2) * (opt.aurora ?? 1);
+  if (aa > 0) for (let x = 0; x < W; x += 1) {
+    const y = 18 + Math.sin(x * .028 + t * .35) * 7 + Math.sin(x * .07 - t * .25) * 3;
+    const hue = (Math.sin(x * .02 + t * .2) + 1) / 2;
+    const c = rgb(mixA([120, 255, 200], [190, 150, 255], hue));
+    for (let k = 0; k < 16; k += 2) { ctx.globalAlpha = aa * .16 * (1 - k / 16); rect(x, y + k, 1, 2, c); }
+  }
+  ctx.globalAlpha = 1;
+  // hành tinh có vành đai
+  if (opt.planet !== false) {
+    const pa = clamp((L - .3) * 2);
+    if (pa > 0) {
+      const px = 196 - cam * .03, py = 30, r = 17;
+      glow(px, py, 40, [255, 210, 230], .18 * pa);
+      ctx.globalAlpha = pa;
+      for (let y = -r; y <= r; y++) for (let x = -r; x <= r; x++) {
+        const d = x * x + y * y; if (d > r * r) continue;
+        const sh = (x + y) / (r * 2);
+        let c = mixA([255, 228, 236], [176, 140, 200], clamp(sh + .4));
+        if (((x * 7 + y * 13) & 31) < 2 || (Math.abs(x + 5) < 3 && Math.abs(y + 4) < 2)) c = mixA(c, [150, 110, 170], .5);
+        rect(px + x, py + y, 1, 1, rgb(c));
+      }
+      for (let i = 0; i < 160; i++) { // vành đai
+        const a = i / 160 * Math.PI * 2, rx = 30, ry = 6;
+        const x = Math.cos(a) * rx, y = Math.sin(a) * ry - x * .18;
+        if (Math.sin(a) < 0 && x * x + y * y < r * r) continue;
+        rect(px + x, py + y, 1, 1, i % 3 ? '#ffe9c4' : '#f6c3d8');
+      }
+      ctx.globalAlpha = 1;
+    }
+  }
+  if (opt.sun) { // mặt trời lớn ở chân trời (màn kết)
+    glow(128, 72, 70, [255, 220, 160], .45);
+    for (let y = -14; y <= 14; y++) { const w = Math.round(Math.sqrt(196 - y * y)); rect(128 - w, 72 + y, w * 2, 1, y % 4 === 0 && y > 0 ? '#ffc888' : '#ffe6a8'); }
+  }
+  // đảo bay xa
+  const fl = mix(VOID, P.far, L);
+  ISLANDS.forEach(([ix, iy, iw], i) => {
+    const x = ((ix - cam * .12) % 1200 + 1200) % 1200 - 60, y = iy + Math.sin(t * .4 + i) * 1.5;
+    if (x < -40 || x > W + 10) return;
+    rect(x, y, iw, 3, fl); rect(x + 2, y + 3, iw - 4, 3, fl); rect(x + 5, y + 6, iw - 10, 3, fl); rect(x + iw / 2 - 2, y + 9, 4, 3, fl);
+    treeSil(x + 6, y, 3, fl); treeSil(x + iw - 7, y, 4, fl);
+    if (L > .5) { // thác nước nhỏ
+      ctx.globalAlpha = (L - .5) * 1.4 * .7;
+      for (let k = 0; k < 18; k++) rect(x + iw - 5, y + 3 + k, 1, 1, (k + Math.floor(t * 12)) % 3 ? '#cfe8ff' : '#ffffff');
+      ctx.globalAlpha = 1;
+      glow(x + 6, y - 3, 6, [255, 230, 160], .25 * L);
+    }
+  });
+  // sương chân trời
+  for (let k = 0; k < 10; k++) { ctx.globalAlpha = .06 * L * (k / 10); rect(0, 62 + k * 3, W, 3, rgb(P.fog)); }
+  ctx.globalAlpha = 1;
+  // đồi giữa với cây phát sáng
+  const m2 = mix(VOID, P.mid2, L);
+  hillLayer(82, 6, .03, .071, cam * .3, m2, (x, wx, y) => {
+    if (((wx | 0) % 37) === 0) treeSil(x, y + 1, 5, m2);
+  });
+  if (L > .4) for (let i = 0; i < 12; i++) {
+    const x = ((i * 53 - cam * .3) % 320 + 320) % 320 - 30, y = 78 + Math.sin(i * 2.3) * 5;
+    glow(x, y, 4, [255, 220, 150], .35 * (L - .4) * (0.7 + .3 * Math.sin(t * 2 + i)));
+  }
+  // đồi gần với cây đèn lồng
+  const nr = mix(VOID, P.near, L);
+  hillLayer(98, 5, .045, .09, cam * .55, nr, (x, wx, y) => {
+    if (((wx | 0) % 53) === 0) { treeSil(x, y + 1, 8, nr); }
+  });
+  if (L > .5) for (let i = 0; i < 10; i++) {
+    const x = ((i * 53 * 1 + 26 - cam * .55) % 530 + 530) % 530 - 20;
+    const y = 92 + Math.sin(i * 1.7) * 3;
+    rect(x, y, 1, 1, '#ffe3a0'); glow(x, y, 5, [255, 200, 140], .3 * (L - .5) * 2);
+  }
+  // tia sáng chiếu xiên
+  if (L > .6 && opt.rays !== false) {
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < 4; i++) {
+      const x0 = 40 + i * 62 - cam * .05 % 60, a = .035 * (L - .6) * 2.5 * (0.6 + .4 * Math.sin(t * .5 + i * 1.3));
+      ctx.fillStyle = `rgba(255,240,220,${a})`;
+      ctx.beginPath(); ctx.moveTo(x0, 0); ctx.lineTo(x0 + 14, 0); ctx.lineTo(x0 - 26, H); ctx.lineTo(x0 - 46, H); ctx.fill();
+    }
+    ctx.globalCompositeOperation = 'source-over';
+  }
+}
+
+function drawTerrain(P, L, cam, t, growth = 1) {
+  const g = mix(VOID, P.grass, L), gh = mix(VOID, P.grassHi, L), gd = mix(VOID, P.grassDk, L);
+  const d = mix(VOID, P.dirt, L), dd = mix(VOID, P.dirtDk, L);
+  SOLIDS.forEach(([x0, x1, top]) => {
+    const sx = x0 - cam, w = x1 - x0;
+    if (sx > W || sx + w < 0) return;
+    rect(sx, top, w, H - top, d);
+    // vân đất, rễ cây và tinh thể
+    SPECKS.forEach(s => { if (s.x > x0 + 2 && s.x < x1 - 2) rect(s.x - cam, top + 6 + s.y, s.c < .7 ? 2 : 1, 1, s.c < .85 ? dd : mix(VOID, P.crystal, L * .8)); });
+    rect(sx, top, w, 3, g); rect(sx, top, w, 1, gh); rect(sx, top + 3, w, 1, gd);
+    for (let x = 3; x < w - 3; x += 7) rect(sx + x, top + 3, 1, 2 + (x * 7 % 3), gd); // cỏ rủ
+    rect(sx, top, 1, H - top, dd); rect(sx + w - 1, top, 1, H - top, dd);
+  });
+  PLATS.forEach(([x0, x1, y], i) => {
+    const sx = x0 - cam, w = x1 - x0;
+    if (sx > W || sx + w < 0) return;
+    rect(sx + 1, y + 3, w - 2, 3, d); rect(sx + 4, y + 6, w - 8, 3, d); rect(sx + 9, y + 9, w - 18, 2, dd);
+    rect(sx + w / 2 - 1, y + 11, 2, 2, dd);
+    rect(sx, y, w, 3, g); rect(sx, y, w, 1, gh);
+    if (L > .3) { // tinh thể treo dưới đảo
+      const cx = sx + w / 2;
+      rect(cx - 1, y + 13, 2, 3, mix(VOID, P.crystal, L)); rect(cx, y + 16, 1, 1, mix(VOID, P.crystal, L));
+      glow(cx, y + 14, 7, [160, 230, 255], .3 * L * (.7 + .3 * Math.sin(t * 2 + i)));
+    }
+  });
+  // cây cỏ hoa lá
+  DECOR.forEach(o => {
+    const x = o.x - cam; if (x < -6 || x > W + 6) return;
+    const sway = Math.round(Math.sin(t * 1.6 + o.p) * .6), gr = growth;
+    if (gr <= 0) return;
+    if (o.k === 'grass') {
+      const h = Math.round((2 + (o.c % 3)) * gr);
+      rect(x, o.y - h, 1, h, gd); rect(x + 1 + sway, o.y - h - 1, 1, h + 1, g); rect(x + 2, o.y - h + 1, 1, h - 1, gd);
+    } else if (o.k === 'flower') {
+      const h = Math.round(4 * gr), c = rgb(mixA(hex(VOID), BALL_RGB[o.c], L));
+      rect(x, o.y - h, 1, h, gd);
+      rect(x - 1 + sway, o.y - h - 1, 3, 1, c); rect(x + sway, o.y - h - 2, 1, 3, c); rect(x + sway, o.y - h - 1, 1, 1, '#fff6d8');
+      glow(x + sway, o.y - h - 1, 4, BALL_RGB[o.c], .25 * L * gr);
+    } else if (o.k === 'mush' && gr > .5) {
+      rect(x, o.y - 3, 1, 3, mix(VOID, '#e8e0f0', L));
+      rect(x - 2, o.y - 5, 5, 2, mix(VOID, '#7ad8f0', L)); rect(x - 1, o.y - 6, 3, 1, mix(VOID, '#7ad8f0', L));
+      rect(x - 1, o.y - 5, 1, 1, mix(VOID, '#e8ffff', L));
+      glow(x, o.y - 5, 7, [120, 220, 255], .35 * L * (.75 + .25 * Math.sin(t * 2.4 + o.p)));
+    } else if (o.k === 'catnip' && gr > .3) { // bụi bạc hà mèo
+      const bc = mix(VOID, '#4f9e7c', L);
+      rect(x - 3, o.y - 4, 7, 4, bc); rect(x - 2, o.y - 6, 5, 2, bc); rect(x, o.y - 7, 1, 1, bc);
+      [[-2, -6], [2, -5], [0, -8], [-3, -3]].forEach(([dx, dy], j) => {
+        rect(x + dx, o.y + dy, 1, 1, mix(VOID, '#d8b0ff', L));
+        if (j === 2) glow(x + dx, o.y + dy, 5, [210, 170, 255], .3 * L * (.6 + .4 * Math.sin(t * 2 + o.p)));
+      });
+    } else if (o.k === 'crystal' && gr > .6) {
+      const cc = mix(VOID, P.crystal, L);
+      rect(x, o.y - 5, 2, 5, cc); rect(x + 2, o.y - 3, 1, 3, cc); rect(x, o.y - 5, 1, 2, '#ffffff');
+      glow(x + 1, o.y - 3, 6, [170, 230, 255], .3 * L);
+    }
+  });
+}
+function drawMotes(L, cam, t, color) {
+  MOTES.forEach((m, i) => {
+    const x = ((m.x - cam * .8 + Math.sin(t * .3 + m.p) * 10) % W + W) % W;
+    const y = ((m.y - t * m.s) % H + H) % H;
+    const a = L * (.4 + .4 * Math.sin(t * 2 + m.p));
+    rect(x, y, 1, 1, rgb(color || m.c)); glow(x, y, 3, color || m.c, a * .35);
+  });
+}
+function drawLantern(x, y, lit, t) {
+  rect(x, y - 16, 1, 16, '#5a4a6a'); rect(x - 2, y - 17, 5, 1, '#5a4a6a');
+  rect(x - 2, y - 15, 5, 5, lit ? '#ffd88a' : '#4a3f5e'); rect(x - 1, y - 16, 3, 1, '#5a4a6a'); rect(x - 2, y - 10, 5, 1, '#5a4a6a');
+  if (lit) { rect(x, y - 13, 1, 1, '#ffffff'); glow(x, y - 12, 16, [255, 200, 120], .45 + .1 * Math.sin(t * 3)); }
+}
+function drawPortal(x, t, open) {
+  const y = 120;
+  // cổng vòm ánh sáng
+  for (let a = 0; a <= 40; a++) {
+    const ang = Math.PI * a / 40, px = x + Math.cos(ang) * 14, py = y - 22 - Math.sin(ang) * 14;
+    rect(px, py, 1, 1, a % 4 ? '#fff2c8' : '#ffffff');
+  }
+  rect(x - 14, y - 22, 1, 22, '#fff2c8'); rect(x + 14, y - 22, 1, 22, '#fff2c8');
+  ctx.globalAlpha = .25 + .1 * Math.sin(t * 2); rect(x - 13, y - 22, 27, 22, '#fff6dc');
+  for (let j = 0; j < 14; j++) { const w = Math.round(Math.sqrt(169 - j * j)); rect(x - w, y - 22 - j, w * 2 + 1, 1, '#fff6dc'); }
+  ctx.globalAlpha = 1;
+  glow(x, y - 22, 36, [255, 230, 180], .35 + (open ? .4 : 0));
+  for (let i = 0; i < 6; i++) {
+    const a = t * 1.2 + i * Math.PI / 3, r = 10 + Math.sin(t * 2 + i) * 2;
+    rect(x + Math.cos(a) * r, y - 22 + Math.sin(a) * r * .9, 1, 1, '#ffffff');
+  }
+}
+
+/* ---------------- Trạng thái chung ---------------- */
+const today = new Date();
+const SPECIAL = (today.getMonth() === 4 && today.getDate() === 4) || location.hash === '#45';
+let scene = 'loading', S = {}, fade = 1, fadeTarget = 0, nextScene = null, fadeColor = '#07060c';
+const nowP = () => performance.now() / 1000;
+const nowA = () => AC ? AC.currentTime : nowP();
+function go(name, color = '#07060c') { nextScene = name; fadeTarget = 1; fadeColor = color; }
+function enter(name) {
+  scene = name; parts = []; queue = [];
+  if (name === 'title') S = { t0: nowP() };
+  if (name === 'world') enterWorld();
+  if (name === 'room') enterRoom();
+  if (name === 'valley') enterValley();
+}
+
+/* ---------------- Điều khiển ---------------- */
+const keys = { left: false, right: false, jump: false };
+let jumpPressed = false, touchMode = matchMedia('(pointer: coarse)').matches;
+const touches = new Map();
+function zoneOf(e) {
+  const r = cv.getBoundingClientRect();
+  const x = (e.clientX - r.left) / r.width * W;
+  return x < 44 ? 'left' : x < 92 ? 'right' : x > W / 2 ? 'jump' : null;
+}
+function refreshTouch() {
+  const z = [...touches.values()];
+  keys.left = z.includes('left'); keys.right = z.includes('right');
+  const j = z.includes('jump'); if (j && !keys.jump) jumpPressed = true; keys.jump = j;
+}
+cv.addEventListener('pointerdown', e => {
+  e.preventDefault(); cv.focus({ preventScroll: true });
+  if (e.pointerType === 'touch') touchMode = true;
+  if (press()) return;
+  if ((scene === 'world' && S.phase === 'play') || scene === 'room') {
+    const z = zoneOf(e);
+    if (e.pointerType !== 'touch' && !touchMode) { jumpPressed = true; keys.jump = true; touches.set(e.pointerId, 'mouse'); return; }
+    if (z) { touches.set(e.pointerId, z); cv.setPointerCapture(e.pointerId); refreshTouch(); }
+  }
+});
+cv.addEventListener('pointermove', e => { if (touches.has(e.pointerId) && touches.get(e.pointerId) !== 'mouse') { const z = zoneOf(e); z ? touches.set(e.pointerId, z) : touches.delete(e.pointerId); refreshTouch(); } });
+['pointerup', 'pointercancel'].forEach(ev => cv.addEventListener(ev, e => {
+  if (touches.get(e.pointerId) === 'mouse') { touches.delete(e.pointerId); keys.jump = false; return; }
+  touches.delete(e.pointerId); refreshTouch();
+}));
+const KEYMAP = { ArrowLeft: 'left', a: 'left', A: 'left', ArrowRight: 'right', d: 'right', D: 'right', ' ': 'jump', ArrowUp: 'jump', w: 'jump', W: 'jump', z: 'jump', Z: 'jump', Enter: 'jump' };
+addEventListener('keydown', e => {
+  const k = KEYMAP[e.key]; if (!k) return;
+  e.preventDefault();
+  if (e.repeat) return;
+  if (k === 'jump' && press()) return;
+  keys[k] = true; if (k === 'jump') jumpPressed = true;
+});
+addEventListener('keyup', e => { const k = KEYMAP[e.key]; if (k) keys[k] = false; });
+document.addEventListener('visibilitychange', () => { if (AC) document.hidden ? AC.suspend() : AC.resume(); });
+/* Chạm/nhấn dùng cho các cảnh không điều khiển nhân vật. Trả về true nếu đã xử lý. */
+function press() {
+  if (nextScene || fade > .3) return true;
+  if (scene === 'title') {
+    const k = nowP() - S.t0;
+    if (k < 5.2) { S.t0 = nowP() - 5.2; return true; }
+    if (k < 6.8) return true;
+    audioInit(); meow(AC.currentTime + .05, .05); go('world'); return true;
+  }
+  if (scene === 'world' && S.phase === 'wake') { wakeTap(); return true; }
+  if (scene === 'valley') { if (nowA() - S.t0 > 20) go('title'); return true; }
+  return false;
+}
+
+/* ---------------- Màn tựa ---------------- */
+function drawTitle(t) {
+  const k = t - S.t0;
+  rect(0, 0, W, H, VOID);
+  const da = k < .4 ? 0 : k < 1.8 ? (k - .4) / 1.4 : k < 3.6 ? 1 : k < 4.8 ? 1 - (k - 3.6) / 1.2 : 0;
+  if (da > 0) { glow(W / 2, H / 2, 50, [120, 100, 180], .12 * da); text('4/5/2026', W / 2, H / 2, 20, '#d6d0e8', da); }
+  const ba = clamp((k - 5.2) / 1.6);
+  if (ba > 0) {
+    STARS.forEach(s => { ctx.globalAlpha = ba * .5 * (.4 + .6 * (.5 + .5 * Math.sin(t * 1.5 + s.p))); rect(s.x, s.y * .6, 1, 1, '#d8d2f0'); });
+    ctx.globalAlpha = ba; rect(0, 120, W, H - 120, '#100e1a');
+    glow(BOX_X, 108, 30, [180, 160, 255], .08 * ba);
+    ctx.globalAlpha = ba * .7;
+    spr('box_base', BOX_X, 120, SPRITE_BOX.box_base); spr('box_lid', BOX_X, 100, SPRITE_BOX.box_lid);
+    ctx.globalAlpha = 1;
+  }
+  if (k > 6.8) paw(W / 2, 132, '#f6cc4c', clamp((k - 6.8) / .6) * (.4 + .6 * (.5 + .5 * Math.sin(t * 3))));
+}
+
+/* ---------------- Thế giới: thức giấc + đi cảnh ---------------- */
+const LIGHT = [0, .03, .07, .12, .28, .48, .68, .86, 1];
+function enterWorld() {
+  S = { phase: 'wake', stage: 0, L: 0, lastTap: -1, nextBeat: nowA() + .4, rings: [], grow: 0,
+        lidAnim: 0, jump: 0, done: 0, cam: 0,
+        cat: newCat(BOX_X, 120),
+        balls: BALL_POS.map(([x, y], i) => ({ x, y, i, got: false })), got: 0, noteI: 0,
+        check: 0, lit: [true, false, false], beatN: 0, exit: 0 };
+}
+function wakeTap() {
+  const t = nowA();
+  if (S.stage >= 8 || t - S.lastTap < .35) return;
+  S.lastTap = t;
+  const onBeat = Math.min(Math.abs(t - (S.nextBeat - BEAT)), Math.abs(S.nextBeat - t)) < .2;
+  S.stage++;
+  musicbox(SCALE[S.stage - 1] - 12, t, onBeat ? .14 : .1);
+  const cx = S.stage >= 4 ? BOX_X + 34 : BOX_X;
+  burst(cx, 104, onBeat ? 16 : 7, onBeat ? ['#fff6c8', '#f6cc4c', '#ffffff', '#c8b8ff'] : ['#cfc8e6'], onBeat ? 45 : 25);
+  if (S.stage === 3) S.lidAnim = t;
+  if (S.stage === 4) { S.jump = t; meow(t + .1); }
+  if (S.stage === 8) { S.done = t; sweep(t + .2); }
+}
+function worldMusic() {
+  const t = nowA();
+  while (S.nextBeat < t + .2) {
+    const b = S.nextBeat, n = S.beatN++;
+    if (S.phase === 'wake') {
+      if (S.stage < 8) { thump(b, .32); thump(b + .2, .16); }
+      const at4 = n % 4 === 0;
+      if (S.stage >= 4 && at4) pad(PROG[(n / 4 | 0) % 4].map(m => m - 12), b, 4 * BEAT * 1.1, .03);
+      if (S.stage >= 6) tone(SCALE[[0, 2, 3, 4][n % 4]], b + BEAT / 2, .9, { type: 'sine', vol: .035 });
+      const nb = b; at(nb, () => { if (S.rings) S.rings.push(nowA()); });
+    } else {
+      const bar = (n / 4 | 0), c = bar % PROG.length;
+      if (n % 4 === 0) { pad(PROG[c], b, 4 * BEAT * 1.1, .03); tone(ROOTS[c], b, 1.4, { vol: .09 }); }
+      if (n % 4 === 2) tone(ROOTS[c] + 7, b, 1, { vol: .06 });
+      const arp = PROG[c].concat(PROG[c][0] + 12);
+      if (n % 2 === 0 || bar % 2) tone(arp[n % 4] + 12, b + (n % 2 ? BEAT / 2 : 0), 1, { type: 'sine', vol: .028 });
+    }
+    S.nextBeat += BEAT;
+  }
+}
+const SPEED = 62, GRAV = 500, HW = 7;
+const WORLD_LVL = { solids: SOLIDS, plats: PLATS, minX: 10, maxX: LW - 10, jump: 212 };
+let runGot = 0;
+function newCat(x, y) { return { x, y, vx: 0, vy: 0, on: true, face: 1, fs: 1, coyote: 0, buf: 0, dist: 0, idle: 0, dazed: 0, sx: 1, sy: 1, air: 0 }; }
+/* Vật lý mềm: tăng tốc/giảm tốc êm, treo nhẹ ở đỉnh cú nhảy, nhún khi bật nhảy và tiếp đất */
+function physics(c, lvl, dt, ctrl) {
+  const dir = ctrl ? (keys.right ? 1 : 0) - (keys.left ? 1 : 0) : 0;
+  const want = dir * SPEED;
+  const acc = c.on ? (dir ? 360 : 480) : 260;
+  c.vx = c.vx < want ? Math.min(want, c.vx + acc * dt) : Math.max(want, c.vx - acc * dt);
+  if (dir) c.face = dir;
+  c.fs += (c.face - c.fs) * Math.min(1, dt * 13);
+  c.coyote = c.on ? .1 : c.coyote - dt;
+  c.buf -= dt;
+  if (jumpPressed && ctrl) c.buf = .14;
+  jumpPressed = false;
+  if (c.buf > 0 && c.coyote > 0) {
+    c.vy = -lvl.jump; c.buf = 0; c.coyote = 0; c.on = false; c.sx = .86; c.sy = 1.14;
+    sfxJump(); burst(c.x, c.y, 5, ['#ffffff', '#c8ffe0'], 16, .4, 0);
+  }
+  if (!keys.jump && c.vy < -110) c.vy = -110;
+  const g = Math.abs(c.vy) < 50 ? GRAV * .55 : GRAV;
+  c.vy = Math.min(280, c.vy + g * dt);
+  let nx = clamp(c.x + c.vx * dt, lvl.minX, lvl.maxX);
+  lvl.solids.forEach(([x0, x1, top, bot]) => {
+    if (bot !== undefined && (c.vy < 0 || c.y - 14 >= bot)) return;
+    if (c.y > top + .5 && nx + HW > x0 && nx - HW < x1) { nx = c.vx > 0 ? x0 - HW : c.vx < 0 ? x1 + HW : nx; c.vx = 0; }
+  });
+  c.x = nx;
+  const wasOn = c.on, impact = c.vy; let ny = c.y + c.vy * dt; c.on = false;
+  if (c.vy >= 0) {
+    lvl.solids.forEach(([x0, x1, top]) => { if (c.x + HW > x0 && c.x - HW < x1 && c.y <= top + .5 && ny >= top) { ny = top; c.vy = 0; c.on = true; } });
+    lvl.plats.forEach(([x0, x1, y]) => { if (c.x + HW - 3 > x0 && c.x - HW + 3 < x1 && c.y <= y + .5 && ny >= y) { ny = y; c.vy = 0; c.on = true; } });
+  }
+  c.y = ny;
+  if (c.on && !wasOn) {
+    const k = clamp(impact / 260);
+    c.sx = 1 + .2 * k; c.sy = 1 - .18 * k;
+    if (k > .3) { sfxLand(); burst(c.x, c.y, 4, ['#ffffff'], 12, .35, 0); }
+  }
+  c.air = c.on ? 0 : c.air + dt;
+  c.sx += (1 - c.sx) * Math.min(1, dt * 9); c.sy += (1 - c.sy) * Math.min(1, dt * 9);
+  if (c.on && Math.abs(c.vx) > 5) { c.dist += Math.abs(c.vx) * dt; c.idle = 0; } else c.idle += dt;
+  c.dazed -= dt;
+}
+const WALK4 = ['cat_walk_1', 'cat_walk_3', 'cat_walk_2', 'cat_walk_4'];
+/* Vẽ Đụt: chu kỳ đi 4 khung, nhún theo bước, thở khi đứng yên, xoay mặt mượt */
+function drawCat(c, cam, poseOverride, opt = {}) {
+  const t = nowA();
+  let pose = poseOverride, br = 1;
+  if (!pose) {
+    if (c.dazed > 0) pose = 'cat_miss';
+    else if (!c.on && c.air > .06) pose = c.vy > 40 ? 'cat_jump_down' : 'cat_jump';
+    else if (Math.abs(c.vx) > 6) pose = WALK4[Math.floor(c.dist / 5) & 3];
+    else pose = c.idle > 2.5 ? 'cat_sit' : 'cat_stand';
+  }
+  if (/sit|lie|stand/.test(pose)) br = 1 + Math.sin(t * 2.2) * .02;
+  if (opt.lvl) { const g = groundBelow(opt.lvl, c.x, c.y); if (g !== null) shadow(c.x - cam, g, g - c.y); }
+  const f = Math.sign(c.fs || 1) * Math.max(.18, Math.abs(c.fs));
+  cat(pose, c.x - cam, c.y + (opt.dy || 0), { sx: c.sx * f, sy: c.sy * br, alpha: opt.alpha });
+}
+function updateWorld(dt) {
+  const t = nowA();
+  worldMusic();
+  S.L += (LIGHT[S.stage] - S.L) * Math.min(1, dt * 1.6);
+  if (S.stage >= 5) S.grow = Math.min(1, S.grow + dt * .7);
+  const c = S.cat;
+  if (S.phase === 'wake') {
+    if (S.stage >= 4 && t - S.jump > .6) c.x = BOX_X + 34;
+    if (S.done && t - S.done > 3.4) { S.phase = 'play'; S.playT = t; S.nextBeat = t + .2; S.beatN = 0; }
+  }
+  if (S.phase === 'play') {
+    physics(c, WORLD_LVL, dt, c.dazed <= 0 && !S.exit);
+    if (c.y > H + 30) { // rơi xuống vực: hiện lại ở đèn lồng gần nhất, không phạt
+      const [lx, ly] = LANTERNS[S.check];
+      Object.assign(c, { x: lx + 10, y: ly, vx: 0, vy: 0, on: true, dazed: .9, face: 1, fs: 1, sx: .7, sy: 1.25 });
+      if (AC) { sweep(AC.currentTime, -1); meow(AC.currentTime + .3, .05); }
+      burst(c.x, c.y - 12, 18, ['#ffffff', '#fff3c4', '#c8b8ff'], 35, .9);
+    }
+    S.balls.forEach(b => {
+      if (b.got) return;
+      if (Math.abs(b.x - c.x) < 10 && Math.abs(b.y - (c.y - 9)) < 12) {
+        b.got = true; S.got++;
+        pluck(SONG[S.noteI % SONG.length], t, .2); S.noteI++;
+        burst(b.x, b.y, 14, ['#ffffff', rgb(BALL_RGB[b.i % 5]), '#fff3c4'], 40, .8, 20);
+      }
+    });
+    LANTERNS.forEach(([lx], i) => {
+      if (!S.lit[i] && c.x > lx - 4) { S.lit[i] = true; S.check = i; musicbox(72, t, .08); musicbox(79, t + .08, .08); burst(lx, 106, 14, ['#ffe3a0', '#ffffff'], 30, .9); }
+    });
+    if (!S.exit && c.x > PORTAL_X - 4 && c.on) { S.exit = t; sweep(t); }
+    if (S.exit && t - S.exit > 1.4 && !nextScene) { runGot = S.got; go('room', '#fff6e4'); }
+    const target = clamp(c.x - W * .4 + c.vx * .4, 0, LW - W);
+    S.cam += (target - S.cam) * Math.min(1, dt * 2.6);
+  }
+}
+function drawWorld() {
+  const t = nowA(), L = S.L, cam = Math.round(S.cam);
+  drawBackdrop(NIGHT, L, cam, t);
+  // nhịp tim (lúc thức giấc)
+  if (S.phase === 'wake') {
+    S.rings = S.rings.filter(r => t - r < 1.2);
+    S.rings.forEach(r => { const k = (t - r) / 1.2; pixRing((S.stage >= 4 ? BOX_X + 34 : BOX_X) - cam, 108, 6 + k * 40, '#fff3c4', (1 - k) * .5 * (1 - L * .6)); });
+  }
+  drawTerrain(NIGHT, L, cam, t, S.grow);
+  LANTERNS.forEach(([lx, ly], i) => { if (L > .5) drawLantern(lx - cam, ly, S.lit[i] && S.phase === 'play', t); });
+  if (L > .5) drawPortal(PORTAL_X - cam, t, S.exit);
+  // hộp giày + Đụt lúc thức giấc
+  const base = 98, bx = BOX_X - cam;
+  if (S.phase === 'wake') {
+    const wiggle = S.stage === 1 ? Math.round(Math.sin(t * 30) * .8) : S.stage === 2 ? -8 + Math.round(Math.sin(t * 4)) : 0;
+    const peek = [0, 0, 11, 18][Math.min(S.stage, 3)];
+    glow(bx, 108, 30, [190, 170, 255], .1 * (1 - L));
+    if (S.stage <= 3) { ctx.save(); ctx.beginPath(); ctx.rect(0, 0, W, base + 1); ctx.clip(); cat('cat_sit', bx, base + 40 - peek); ctx.restore(); }
+  }
+  spr('box_base', bx, 120, SPRITE_BOX.box_base);
+  if (S.stage < 3) spr('box_lid', bx, base + 2 + (S.stage === 1 ? Math.round(Math.sin(t * 30) * .8) : S.stage === 2 ? -8 + Math.round(Math.sin(t * 4)) : 0), SPRITE_BOX.box_lid);
+  else { const k0 = Math.min(1, (t - S.lidAnim) / .7), k = easeOut(k0); spr('box_lid', bx - k * 40, (base + 2) + (120 - base - 2) * k0 * k0 - Math.sin(k0 * Math.PI) * 14, SPRITE_BOX.box_lid); }
+  // bóng
+  S.balls.forEach(b => {
+    if (b.got) return;
+    const x = b.x - cam; if (x < -10 || x > W + 10) return;
+    const y = b.y + Math.sin(t * 2.5 + b.i) * 2;
+    glow(x, y - 1, 8, BALL_RGB[b.i % 5], .35 * L);
+    spr(BALL_NAMES[b.i % 5], x, y + 4, SPRITE_BOX.ball, { alpha: clamp((L - .6) * 3) });
+  });
+  // Đụt
+  if (S.stage >= 4) {
+    const c = S.cat;
+    if (S.phase === 'wake') {
+      const k0 = Math.min(1, (t - S.jump) / .6), k = ease(k0);
+      let x = BOX_X + 34 * k, y = 120, pose = 'cat_sit', sx = 1, sy = 1;
+      if (k0 < 1) { y = lerp(base + 22, 120, k) - Math.sin(k0 * Math.PI) * 18; pose = 'cat_pounce'; sy = 1 + Math.sin(k0 * Math.PI) * .08; }
+      const land = t - S.jump - .6;
+      if (land > 0 && land < .35) { const q = Math.sin(land / .35 * Math.PI) * .16; sx = 1 + q; sy = 1 - q; }
+      if (S.done && t - S.done > 1 && t - S.done < 3.2) {
+        pose = 'cat_stretch'; const q = clamp((t - S.done - 1) / .4) * clamp((3.2 - (t - S.done)) / .4);
+        sx = 1 + q * .05; sy = 1 - q * .04;
+      } else if (k0 >= 1) sy *= 1 + Math.sin(t * 2.2) * .025;
+      glow(x - cam, y - 10, 18, [200, 190, 255], .12 * L);
+      shadow(x - cam, 120, 120 - y, .25 * L);
+      cat(pose, x - cam, y, { sx, sy });
+    } else {
+      glow(c.x - cam, c.y - 10, 18, [200, 190, 255], .12 * L);
+      drawCat(c, cam, null, { lvl: WORLD_LVL, alpha: S.exit ? 1 - clamp((t - S.exit) / 1.2) : 1 });
+    }
+  }
+  drawMotes(clamp((L - .3) * 1.5), cam, t);
+  drawParts(cam);
+  // bóng tối lúc chưa tỉnh
+  const dark = 1 - Math.min(1, L * 1.4);
+  if (dark > 0) {
+    const g = ctx.createRadialGradient(bx, 108, 10, bx, 108, 140);
+    g.addColorStop(0, 'rgba(7,6,12,0)'); g.addColorStop(1, 'rgba(7,6,12,' + (.9 * dark) + ')');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  }
+  // viền tối nhẹ cho chiều sâu
+  const v = ctx.createRadialGradient(W / 2, H / 2, 60, W / 2, H / 2, 170);
+  v.addColorStop(0, 'rgba(10,6,24,0)'); v.addColorStop(1, 'rgba(10,6,24,.45)');
+  ctx.fillStyle = v; ctx.fillRect(0, 0, W, H);
+  if (S.phase === 'wake' && S.stage < 2) paw(W / 2, 134, '#f6cc4c', .35 + .35 * Math.sin(nowP() * 3));
+  if (S.phase === 'play') drawHUD(t);
+}
+function drawHUD(t) {
+  spr('ball_yellow', 10, 14, [8, 8]);
+  text(String(S.got), 22, 9, 12, '#fff6e0');
+  const since = t - S.playT;
+  if (touchMode) {
+    const a = .35;
+    ctx.globalAlpha = keys.left ? .7 : a; arrow(20, 128, -1); ctx.globalAlpha = keys.right ? .7 : a; arrow(66, 128, 1);
+    ctx.globalAlpha = 1; paw(232, 126, '#ffffff', keys.jump ? .8 : a);
+  } else if (since < 6) { // gợi ý phím, không chữ
+    const a = clamp(Math.min(since, 6 - since));
+    keycap(108, 128, -1, 11, a * .8); keycap(122, 128, 1, 11, a * .8); keycap(144, 128, 0, 18, a * .8);
+  }
+}
+function arrow(x, y, d) {
+  ctx.fillStyle = '#ffffff';
+  for (let i = 0; i < 6; i++) ctx.fillRect(Math.round(x + d * (i - 3)), y - i, 1, i * 2 + 1);
+}
+function keycap(x, y, s, w, a) {
+  ctx.globalAlpha = a;
+  rect(x - w / 2, y - 6, w, 12, 'rgba(20,16,40,.6)'); rect(x - w / 2, y - 6, w, 1, '#ffffff'); rect(x - w / 2, y + 5, w, 1, '#ffffff');
+  rect(x - w / 2, y - 6, 1, 12, '#ffffff'); rect(x + w / 2 - 1, y - 6, 1, 12, '#ffffff');
+  ctx.fillStyle = '#ffffff';
+  if (s) for (let i = 0; i < 3; i++) ctx.fillRect(Math.round(x - s * (i - 1)), y - i, 1, i * 2 + 1);
+  else ctx.fillRect(x - 5, y + 1, 10, 1), ctx.fillRect(x - 5, y - 1, 1, 2), ctx.fillRect(x + 4, y - 1, 1, 2);
+  ctx.globalAlpha = 1;
+}
+
+/* ---------------- Màn ký ức: căn phòng ---------------- */
+/* Bố cục theo ảnh: đồng hồ trên tường, tủ lạnh + khay vệ sinh bên trái,
+   tủ bếp và bếp ở giữa, cửa phòng ngủ bên phải. */
+const RW = 292, RF = 136;                    // bề ngang phòng, mặt sàn
+const ROOM_LVL = {
+  solids: [[0, RW, RF], [149, 213, 83, 94]], // sàn; bếp (khối nằm trên mặt tủ)
+  plats: [[59, 213, 94], [10, 52, 52]],      // mặt tủ bếp; nóc tủ lạnh
+  minX: 14, maxX: RW - 14, jump: 228,
+};
+const MEMS = [
+  { id: 'tray',   x: 31,  y: RF, dur: 5 },    // khay vệ sinh
+  { id: 'balls',  x: 92,  y: RF, dur: 5.5 },  // bóng lăn ra từ gầm tủ
+  { id: 'clock',  x: 108, y: 94, dur: 6.5 },  // ngồi trên mặt tủ, nhìn đồng hồ chờ chủ về
+  { id: 'stove',  x: 134, y: 94, dur: 6 },    // nằm sưởi cạnh bếp
+  { id: 'fridge', x: 31,  y: 52, dur: 6 },    // nóc tủ lạnh, sữa chua và kem
+];
+const ICONS = {
+  tray:   { p: ['.......', '..sss..', '.sssss.', 'ddddddd', 'd.....d', '.ddddd.'], c: { s: '#ead9b2', d: '#5d6a82' } },
+  balls:  { p: ['..rr...', '.rwrr..', '.rrrr..', '..rr.bb', '.....bb'], c: { r: '#ee6262', w: '#ffffff', b: '#5c9cec' } },
+  clock:  { p: ['.kkkkk.', 'kwwkwwk', 'kwwkwwk', 'kwwkkkk', 'kwwwwwk', '.kkkkk.'], c: { k: '#3a3440', w: '#f8f6f0' } },
+  stove:  { p: ['...o...', '..ooo..', '.oyoyo.', '.oyyyo.', '..ooo..', 'kkkkkkk'], c: { o: '#ff9a4a', y: '#ffe08a', k: '#3a3440' } },
+  fridge: { p: ['..ppp..', '.ppwpp.', '.ppppp.', '..ttt..', '..ttt..', '...t...'], c: { p: '#f6a8c8', w: '#ffffff', t: '#e0b070' } },
+};
+function icon(id, x, y, a = 1) {
+  const I = ICONS[id]; ctx.globalAlpha = a;
+  I.p.forEach((row, j) => [...row].forEach((ch, i) => { if (ch !== '.') rect(x + i - 3, y + j - 3, 1, 1, I.c[ch]); }));
+  ctx.globalAlpha = 1;
+}
+function scratch(t, v = .05) {
+  const s = AC.createBufferSource(), f = AC.createBiquadFilter(), g = AC.createGain();
+  s.buffer = noiseBuf; f.type = 'bandpass'; f.frequency.value = 2600; f.Q.value = 1.2;
+  g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(v, t + .02); g.gain.exponentialRampToValueAtTime(.0001, t + .13);
+  s.connect(f); f.connect(g); g.connect(master); s.start(t); s.stop(t + .15);
+}
+function purr(t, dur, v = .08) { // tiếng gừ gừ
+  const s = AC.createBufferSource(), f = AC.createBiquadFilter(), g = AC.createGain(), e = AC.createGain();
+  const lfo = AC.createOscillator(), lg = AC.createGain();
+  s.buffer = noiseBuf; s.loop = true; f.type = 'lowpass'; f.frequency.value = 260;
+  g.gain.value = 0; lfo.frequency.value = 24; lg.gain.value = v; lfo.connect(lg); lg.connect(g.gain);
+  e.gain.setValueAtTime(0, t); e.gain.linearRampToValueAtTime(1, t + .6); e.gain.setValueAtTime(1, t + dur - .8); e.gain.linearRampToValueAtTime(0, t + dur);
+  s.connect(f); f.connect(g); g.connect(e); e.connect(master);
+  s.start(t); lfo.start(t); s.stop(t + dur + .05); lfo.stop(t + dur + .05);
+}
+const tick = (t, v = .03) => tone(98, t, .05, { type: 'square', vol: v, cut: 3500 });
+
+function enterRoom() {
+  const t = nowA();
+  S = { t0: t, cat: newCat(122, RF), cam: 0, mems: MEMS.map(m => ({ ...m, done: false })), cur: null, curT: 0,
+        doneN: 0, doorT: 0, exit: 0, nextBeat: t + 1.2, beatN: 0, flying: [], tint: 0, prints: [] };
+  S.cat.idle = 3; S.cat.sy = 1.3; S.cat.sx = .7;
+  burst(122, RF - 12, 24, ['#ffffff', '#fff3c4', '#ffd0e0'], 35, 1.1);
+  at(t + .3, tt => meow(tt, .05));
+}
+function roomMusic() {
+  const t = nowA(), B = .9;
+  while (S.nextBeat < t + .2) {
+    const b = S.nextBeat, n = S.beatN++, c = (n / 4 | 0) % PROG.length;
+    if (n % 4 === 0) pad(PROG[c].map(m => m - 12), b, 4 * B * 1.1, S.cur ? .02 : .028);
+    if (!S.cur && n % 2 === 0) musicbox(SONG[(n / 2) % SONG.length] - 12, b, .045);
+    S.nextBeat += B;
+  }
+}
+function startMem(m, t) {
+  S.cur = m; S.curT = t;
+  const c = S.cat; c.vx = 0;
+  c.face = m.id === 'tray' || m.id === 'fridge' ? 1 : 1;
+  if (m.id === 'tray') { for (let i = 0; i < 10; i++) at(t + .4 + i * .22 + (i > 4 ? .5 : 0), tt => scratch(tt)); }
+  if (m.id === 'balls') { [0, 2, 4, 3, 2, 4, 5].forEach((d, i) => at(t + .5 + i * .55, tt => pluck(SCALE[d], tt, .12))); }
+  if (m.id === 'clock') {
+    for (let i = 0; i < 26; i++) at(t + .3 + 4.6 * Math.pow(i / 26, .7), tt => tick(tt));
+    at(t + 5, tt => { musicbox(72, tt, .1); musicbox(79, tt + .15, .1); meow(tt + .4, .06); });
+  }
+  if (m.id === 'stove') { at(t + .5, tt => purr(tt, 5.2)); at(t + .3, tt => pad([64, 67, 72], tt, 5, .03)); }
+  if (m.id === 'fridge') { at(t + .6, tt => sweep(tt)); at(t + 2, tt => { musicbox(84, tt, .08); musicbox(88, tt + .2, .08); }); at(t + 3.4, tt => meow(tt, .06)); }
+}
+function updateRoom(dt) {
+  const t = nowA(), c = S.cat;
+  roomMusic();
+  physics(c, ROOM_LVL, dt, !S.cur && !S.exit && t - S.t0 > .8);
+  if (!S.cur && !S.exit) S.mems.forEach(m => {
+    if (!m.done && c.on && Math.abs(c.x - m.x) < 9 && Math.abs(c.y - m.y) < 2) startMem(m, t);
+  });
+  if (S.cur) {
+    const m = S.cur, k = t - S.curT;
+    c.x += (m.x - c.x) * Math.min(1, dt * 5);
+    if (m.id === 'tray' && Math.random() < dt * 8 && k < 3) burst(c.x + (Math.random() - .5) * 12, RF - 4, 2, ['#ead9b2', '#d8c49a'], 20, .5, 60);
+    if (m.id === 'tray' && k > 2.6) { const n = Math.floor((k - 2.6) * 4); while (S.prints.length < Math.min(n, 9)) S.prints.push({ x: m.x + 18 + S.prints.length * 11, t }); }
+    if (k > m.dur) {
+      m.done = true; S.cur = null; S.doneN++;
+      S.flying.push({ id: m.id, t, x: c.x - S.cam, y: c.y - 24, slot: S.doneN - 1 });
+      musicbox(SCALE[S.doneN + 1], t, .1);
+      if (S.doneN === MEMS.length) { S.doorT = t + 1.2; at(t + 1.2, tt => { sweep(tt); meow(tt + .8, .05); }); }
+    }
+  }
+  S.tint += ((S.cur ? 1 : 0) - S.tint) * Math.min(1, dt * 2.2);
+  if (S.doorT && t > S.doorT + .6 && !S.exit && c.on && c.y === RF && c.x > 246) { S.exit = t; }
+  if (S.exit) { c.x = Math.min(RW - 18, c.x + 22 * dt); c.vx = 22; c.dist += 22 * dt; }
+  if (S.exit && t - S.exit > 1.8 && !nextScene) go('valley', '#fff6e4');
+  S.prints = S.prints.filter(p => t - p.t < 8);
+  const target = clamp(c.x - W / 2 + c.vx * .3, 0, RW - W);
+  S.cam += (target - S.cam) * Math.min(1, dt * 2.5);
+}
+
+function hand(cx, cy, ang, len, c) {
+  for (let i = 0; i <= len; i++) rect(cx + Math.sin(ang) * i, cy - Math.cos(ang) * i, 1, 1, c);
+}
+function drawRoom() {
+  const t = nowA(), cam = Math.round(S.cam), c = S.cat, X = x => x - cam;
+  const m = S.cur, mk = m ? t - S.curT : 0;
+  // ---- tường ----
+  rect(0, 0, W, H, '#2a2232');
+  for (let x = 4; x < RW - 4; x += 2) {
+    const k = x / RW;
+    rect(X(x), 0, 2, RF, mix('#fbf3e8', '#efe2d2', k));
+  }
+  for (let x = 14; x < RW - 4; x += 14) { rect(X(x), 3, 1, RF - 6, 'rgba(214,196,176,.35)'); for (let y = 10; y < RF - 6; y += 14) rect(X(x + 7), y, 1, 1, 'rgba(214,180,170,.5)'); }
+  rect(X(4), 0, RW - 8, 3, '#e4d4c2'); rect(X(4), 3, RW - 8, 1, '#d6c4b0');
+  rect(X(4), RF - 4, RW - 8, 4, '#dccab6'); rect(X(4), RF - 4, RW - 8, 1, '#efe2d2');
+  // vệt nắng chiều xiên trên tường
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.fillStyle = `rgba(255,214,150,${.07 + .02 * Math.sin(t * .4)})`;
+  ctx.beginPath(); ctx.moveTo(X(60), 0); ctx.lineTo(X(130), 0); ctx.lineTo(X(240), RF); ctx.lineTo(X(150), RF); ctx.fill();
+  ctx.globalCompositeOperation = 'source-over';
+  // ---- sàn gỗ ----
+  rect(0, RF, W, H - RF, '#c99c72'); rect(0, RF, W, 1, '#ddb48a');
+  for (let x = -cam % 26; x < W; x += 26) { rect(x, RF + 1, 1, 3, '#b5875f'); rect(x + 13, RF + 4, 1, 4, '#b5875f'); }
+  rect(0, RF + 4, W, 1, '#b98c63');
+  rect(X(96), RF + 2, 72, 4, '#e2a6a0'); rect(X(98), RF + 3, 68, 2, '#eebab2');
+  for (let x = 100; x < 166; x += 6) rect(X(x), RF + 3, 2, 1, '#d48c86');
+  // ---- đồng hồ ----
+  const ck = X(143), cy = 13;
+  rect(X(131), 2, 25, 21, '#25212b'); rect(X(131), 2, 25, 1, '#3a3442');
+  for (let y = -8; y <= 8; y++) { const w = Math.round(Math.sqrt(64 - y * y)); rect(ck - w, cy + y, w * 2 + 1, 1, y === -8 || y === 8 ? '#9a96a4' : '#f8f6f0'); }
+  [[0, -7], [7, 0], [0, 7], [-7, 0]].forEach(([dx, dy]) => rect(ck + dx, cy + dy, 1, 1, '#3a3440'));
+  let ma = t * .15, ha = t * .0125;
+  if (m && m.id === 'clock') { const sp = Math.pow(clamp(mk / 5), 1.6) * 40; ma += sp; ha += sp / 12; }
+  hand(ck, cy, ha, 4, '#3a3440'); hand(ck, cy, ma, 6, '#c0504a'); rect(ck, cy, 1, 1, '#25212b');
+  // ---- tủ lạnh ----
+  const fx = X(10), fy = 52, fw = 42, fh = RF - 52;
+  const fopen = m && m.id === 'fridge' ? ease(clamp((mk - .5) / .8)) * (1 - ease(clamp((mk - 4.8) / .8))) : 0;
+  rect(fx, fy, fw, fh, '#b597b0'); rect(fx + 1, fy + 1, fw - 2, fh - 1, '#ead5e5');
+  rect(fx + 1, fy + 1, fw - 2, 1, '#f8eaf4'); rect(fx + fw - 4, fy + 1, 3, fh - 1, '#dcc2d6');
+  rect(fx + 1, fy + 26, fw - 2, 1, '#b597b0');
+  rect(fx + fw - 7, fy + 8, 2, 12, '#9b7f98'); rect(fx + fw - 7, fy + 32, 2, 18, '#9b7f98');
+  heart(fx + 10, fy + 9, '#e86a7a'); // nam châm trái tim
+  rect(fx + 14, fy + 34, 9, 8, '#ffffff'); rect(fx + 15, fy + 35, 7, 5, '#a8b4c8'); rect(fx + 17, fy + 37, 3, 3, '#8a93a8'); // ảnh nhỏ của Đụt
+  rect(fx + 17, fy + 36, 1, 1, '#8a93a8'); rect(fx + 19, fy + 36, 1, 1, '#8a93a8');
+  if (fopen > 0) { // cửa dưới mở ra, ánh sáng lạnh
+    const ix = fx + 1, iy = fy + 27, iw = fw - 2, ih = fh - 28;
+    rect(ix, iy, iw, ih, '#e4f6ff');
+    for (let y = iy + 10; y < iy + ih; y += 12) rect(ix + 2, y, iw - 4, 1, '#b8d8e8');
+    rect(ix + 6, iy + 4, 6, 6, '#ffffff'); rect(ix + 6, iy + 4, 6, 2, '#f6a8c8'); // hũ sữa chua
+    rect(ix + 20, iy + 15, 8, 7, '#fff2c8'); rect(ix + 20, iy + 15, 8, 1, '#c8a46a');
+    const dw = Math.round(iw * (1 - fopen * .85));
+    rect(ix, iy, dw, ih, '#dcc2d6'); rect(ix + dw - 1, iy, 1, ih, '#b597b0');
+    glow(ix + iw / 2, iy + ih / 2, 34, [180, 230, 255], .4 * fopen);
+  }
+  // ---- tủ bếp ----
+  rect(X(59), 100, 154, RF - 100, '#a88f90'); rect(X(60), 100, 152, RF - 101, '#eedede');
+  [[60, 115], [116, 171], [178, 212]].forEach(([a, b]) => {
+    rect(X(a + 3), 104, b - a - 6, RF - 110, '#e6d2d2'); rect(X(a + 3), 104, b - a - 6, 1, '#d6bebe'); rect(X(a + 3), RF - 7, b - a - 6, 1, '#f6eaea');
+  });
+  rect(X(115), 100, 1, RF - 100, '#a88f90'); rect(X(171), 94, 7, RF - 94, '#cfe8c6'); rect(X(171), 94, 1, RF - 94, '#94bf8f'); rect(X(177), 94, 1, RF - 94, '#94bf8f');
+  rect(X(60), RF - 3, 152, 3, '#c9b0b0');
+  [104, 125, 188].forEach(x => { rect(X(x), 117, 3, 3, '#26222a'); rect(X(x), 117, 1, 1, '#5a5460'); });
+  rect(X(57), 94, 158, 6, '#94bf8f'); rect(X(57), 94, 158, 5, '#cfe8c6'); rect(X(57), 94, 158, 1, '#eaf8e4');
+  // ---- bếp ----
+  const hot = m && m.id === 'stove' ? ease(clamp(mk / 1.2)) * (1 - ease(clamp((mk - 5) / 1))) : 0;
+  rect(X(149), 83, 64, 6, '#1f1d24'); rect(X(149), 83, 64, 1, '#4a4552');
+  rect(X(158), 82, 12, 1, hot > 0 ? mix('#3a3640', '#ff7a3a', hot) : '#3a3640'); rect(X(192), 82, 12, 1, '#3a3640');
+  rect(X(158), 89, 6, 4, '#e8e8ee'); rect(X(194), 89, 6, 4, '#e8e8ee');
+  if (hot > 0) {
+    glow(X(164), 82, 28, [255, 150, 70], .35 * hot);
+    for (let i = 0; i < 5; i++) for (let y = 0; y < 22; y += 1) {
+      const x = X(156 + i * 4) + Math.sin(y * .5 - t * 4 + i) * 1.5;
+      ctx.globalAlpha = hot * .25 * (1 - y / 22); rect(x, 80 - y, 1, 1, '#ffd2a0');
+    }
+    ctx.globalAlpha = 1;
+  }
+  // ---- cửa phòng ngủ ----
+  const dx = X(234), dy = 52, dW = 42, dH = RF - 52;
+  const dopen = S.doorT ? ease(clamp((t - S.doorT) / 1.4)) : 0;
+  if (dopen > 0) {
+    rect(dx, dy, dW, dH, '#fff4d6');
+    glow(dx + dW / 2, dy + dH / 2, 70, [255, 230, 170], .55 * dopen);
+    ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = `rgba(255,226,170,${.25 * dopen})`;
+    ctx.beginPath(); ctx.moveTo(dx, RF); ctx.lineTo(dx + dW, RF); ctx.lineTo(dx + dW + 20, H); ctx.lineTo(dx - 50, H); ctx.fill();
+    ctx.globalCompositeOperation = 'source-over';
+  }
+  const pw = Math.max(4, Math.round(dW * (1 - dopen * .82)));
+  const px = dx + dW - pw;
+  rect(px, dy, pw, dH, '#5a4345'); rect(px + 1, dy + 1, pw - 2, dH - 1, '#7d6062');
+  if (pw > 14) {
+    rect(px + 5, dy + 6, pw - 10, 30, '#6c5254'); rect(px + 6, dy + 7, pw - 12, 28, '#846668');
+    rect(px + 5, dy + 44, pw - 10, 34, '#6c5254'); rect(px + 6, dy + 45, pw - 12, 32, '#846668');
+    rect(px + 2, 92, 4, 4, '#26222a'); rect(px + 3, 93, 2, 2, '#ffffff');
+  }
+  if (!dopen) { // vệt sáng dưới khe cửa
+    ctx.globalAlpha = .35 + .2 * Math.sin(t * 1.5); rect(dx + 2, RF - 1, dW - 4, 1, '#ffe2a0'); ctx.globalAlpha = 1;
+    glow(dx + dW / 2, RF, 14, [255, 220, 150], .12 + (S.doneN === MEMS.length ? .2 : 0));
+  }
+  // ---- khay vệ sinh + bát ăn ----
+  const tx = X(13);
+  rect(tx, RF - 8, 34, 8, '#4d5870'); rect(tx + 1, RF - 7, 32, 6, '#6c7a96'); rect(tx - 1, RF - 9, 36, 2, '#8796b0');
+  rect(tx + 2, RF - 10, 30, 1, '#ead9b2'); for (let i = 0; i < 6; i++) rect(tx + 4 + i * 5, RF - 11 + (i % 2), 2, 1, '#e0cc9c');
+  rect(X(218), RF - 4, 12, 4, '#4a7cc0'); rect(X(217), RF - 5, 14, 1, '#6aa0d8'); rect(X(219), RF - 6, 3, 1, '#9a6a3a'); rect(X(223), RF - 6, 2, 1, '#b07a44'); rect(X(226), RF - 6, 2, 1, '#9a6a3a');
+  // ---- dấu chân cát (ký ức khay vệ sinh) ----
+  S.prints.forEach(p => { const a = clamp(1 - (t - p.t) / 8) * .8; paw(X(p.x), RF - 3, '#c8b088', a * .9); });
+  // ---- bóng lăn ra (ký ức chơi bóng) ----
+  if (m && m.id === 'balls') {
+    [[0, 70], [1, 112], [2, 128]].forEach(([i, tx2], j) => {
+      const u = clamp((mk - .4 - j * .35) / 1.2), x = lerp(150, tx2, easeOut(u));
+      const y = RF - Math.abs(Math.sin(u * Math.PI * 2.5)) * 10 * (1 - u) - (mk > 2 ? Math.abs(Math.sin((mk - 2) * 3 + j)) * 6 * clamp((m.dur - .5 - mk)) : 0);
+      spr(BALL_NAMES[i * 2 % 5], X(x), y, SPRITE_BOX.ball, { alpha: clamp((m.dur - mk) * 2) });
+    });
+  }
+  // ---- chỗ có ký ức: dấu chân phát sáng ----
+  S.mems.forEach((mm, i) => {
+    if (mm.done || mm === m) return;
+    const b = Math.sin(t * 2 + i) * 2, a = .55 + .3 * Math.sin(t * 3 + i);
+    glow(X(mm.x), mm.y - 20 + b, 10, [255, 220, 160], .35);
+    paw(X(mm.x), mm.y - 21 + b, '#ffcf7a', a);
+    pixRing(X(mm.x), mm.y - 1, 5 + Math.sin(t * 2 + i), '#ffcf7a', .25);
+  });
+  // ---- Đụt ----
+  let pose = null, dyc = 0;
+  if (m) {
+    pose = 'cat_sit';
+    if (m.id === 'balls' && mk > 1.6 && mk < m.dur - .6) { const ph = (mk - 1.6) % 1; pose = ph < .45 ? 'cat_pounce' : 'cat_sit'; dyc = -Math.sin(clamp(ph / .45) * Math.PI) * 5; }
+    if (m.id === 'stove') pose = mk < 1.5 ? 'cat_lie' : (mk < m.dur - .7 ? 'cat_lie_blink' : 'cat_lie');
+    if (m.id === 'clock' && mk > 5.2) pose = 'cat_stand';
+    if (m.id === 'fridge' && mk > 2.9 && mk < 5.3) pose = 'cat_eat';
+  }
+  if (S.exit) pose = WALK4[Math.floor(c.dist / 5) & 3];
+  glow(X(c.x), c.y - 10, 18, [255, 220, 200], .12);
+  drawCat(c, cam, pose, { lvl: ROOM_LVL, dy: dyc, alpha: S.exit ? 1 - clamp((t - S.exit - .6) / 1.2) : 1 });
+  // hơi ấm / giấc ngủ: bong bóng nhỏ bay lên
+  if (m && m.id === 'stove' && mk > 1.6 && mk < m.dur - .6) for (let i = 0; i < 3; i++) {
+    const u = ((mk * .5 + i / 3) % 1); ctx.globalAlpha = (1 - u) * .7;
+    const r = 1 + Math.round(u * 2); pixRing(X(c.x + 10 + u * 6), c.y - 22 - u * 16, r, '#ffffff', (1 - u) * .7);
+  }
+  // sữa chua và kem bay lên; hũ sữa chua đáp xuống trước mặt Đụt
+  if (m && m.id === 'fridge' && mk > 1.2) {
+    const u = easeOut(clamp((mk - 1.2) / 1.3)), a = clamp((m.dur - .4 - mk) * 1.5);
+    const yy = lerp(110, 38, u) + Math.sin(t * 2.4) * 1.5;
+    const land = ease(clamp((mk - 2.4) / .5));
+    const ax = X(lerp(54, 46, land)), ay = lerp(yy, 45, land);
+    const eaten = clamp((mk - 3) / 2.2);
+    ctx.globalAlpha = a;
+    rect(ax, ay, 7, 7, '#ffffff'); rect(ax, ay + 1 + Math.round(eaten * 3), 7, 2 - Math.round(eaten * 1.5), '#f6a8c8');
+    rect(ax, ay, 7, 1, '#e8e0ea'); rect(ax + 1, ay + 5, 5, 1, '#f0d0e0'); // hũ sữa chua
+    const bx2 = X(60), by2 = yy + 4 + Math.sin(t * 2.4 + 1) * 1.5;
+    rect(bx2, by2 - 6, 7, 5, '#f6a8c8'); rect(bx2 + 1, by2 - 7, 5, 1, '#f6a8c8'); rect(bx2 + 2, by2 - 6, 2, 1, '#ffffff'); // kem
+    rect(bx2 + 1, by2 - 1, 5, 2, '#e0b070'); rect(bx2 + 2, by2 + 1, 3, 2, '#e0b070'); rect(bx2 + 3, by2 + 3, 1, 1, '#c8954e');
+    ctx.globalAlpha = 1;
+    glow(X(56), yy + 2, 14, [255, 220, 240], .4 * a * (1 - land * .5));
+    if (Math.random() < .3) burst(56 + (Math.random() - .5) * 16, yy, 1, ['#ffffff', '#ffd0e8'], 10, .6, -10);
+    if (mk > 3 && mk < 5.2 && Math.random() < .15) burst(44, 46, 1, ['#ffd0e8', '#ffffff'], 12, .5, 30);
+  }
+  // bụi nắng
+  for (let i = 0; i < 18; i++) {
+    const x = ((i * 47 + Math.sin(t * .3 + i) * 12) % 240) + 20, y = ((i * 29 - t * (2 + i % 3)) % RF + RF) % RF;
+    ctx.globalAlpha = .35 + .25 * Math.sin(t * 2 + i); rect(X(x), y, 1, 1, '#fff2d0');
+  }
+  ctx.globalAlpha = 1;
+  drawParts(cam);
+  // ---- lớp màu ký ức ----
+  if (m && m.id === 'clock') { // ngày trôi qua: chiều → tối → sáng
+    const u = clamp(mk / 5.2);
+    const col = u < .33 ? mixA([255, 170, 90], [40, 40, 110], u / .33) : u < .75 ? [30, 32, 90] : mixA([30, 32, 90], [255, 236, 200], (u - .75) / .25);
+    const a = u < .1 ? u * 5 : u < .9 ? (u > .33 && u < .75 ? .6 : .45) : (1 - u) * 5;
+    ctx.globalAlpha = clamp(a) * .9; rect(0, 0, W, H, rgb(col)); ctx.globalAlpha = 1;
+    if (u > .7 && u < .95) glow(X(255), RF - 10, 40, [255, 220, 150], .5 * Math.sin((u - .7) / .25 * Math.PI)); // đèn phòng ngủ bật: chủ về
+  }
+  const T = S.tint;
+  if (T > .01) {
+    ctx.globalAlpha = .18 * T; rect(0, 0, W, H, '#ffcf9a'); ctx.globalAlpha = 1;
+    for (let i = 0; i < 40 * T; i++) { ctx.globalAlpha = .12; rect(Math.random() * W, Math.random() * H, 1, 1, '#ffffff'); }
+    ctx.globalAlpha = 1;
+    const bar = Math.round(6 * ease(T)); rect(0, 0, W, bar, '#1a1420'); rect(0, H - bar, W, bar, '#1a1420');
+  }
+  const v = ctx.createRadialGradient(W / 2, H / 2, 70, W / 2, H / 2, 165);
+  v.addColorStop(0, 'rgba(40,20,30,0)'); v.addColorStop(1, `rgba(40,20,30,${.35 + .25 * T})`);
+  ctx.fillStyle = v; ctx.fillRect(0, 0, W, H);
+  // ---- khung ký ức góc trên ----
+  for (let i = 0; i < MEMS.length; i++) {
+    const sx = W - 12 - (MEMS.length - 1 - i) * 12, sy = 7 + (T > .01 ? Math.round(6 * ease(T)) : 0);
+    rect(sx - 5, sy - 5, 11, 11, 'rgba(255,248,236,.55)'); rect(sx - 4, sy - 4, 9, 9, 'rgba(90,60,70,.35)');
+  }
+  S.flying.forEach(f => {
+    const u = clamp((t - f.t) / 1), e = ease(u);
+    const sx = W - 12 - (MEMS.length - 1 - f.slot) * 12, sy = 7 + Math.round(6 * ease(T));
+    const x = lerp(f.x, sx, e), y = lerp(f.y, sy, e) - Math.sin(u * Math.PI) * 18;
+    if (u < 1) glow(x, y, 10, [255, 230, 180], .5 * (1 - u));
+    icon(f.id, Math.round(x), Math.round(y));
+  });
+  if (touchMode && !m && !S.exit) {
+    ctx.globalAlpha = keys.left ? .7 : .3; arrow(20, 128, -1); ctx.globalAlpha = keys.right ? .7 : .3; arrow(66, 128, 1);
+    ctx.globalAlpha = 1; paw(232, 126, '#ffffff', keys.jump ? .8 : .3);
+  }
+}
+
+/* ---------------- Màn kết: Thung lũng nắng — Đụt gặp các bạn mèo ---------------- */
+const GV = 118;
+const DUT_X = 128, DUT_Y = 127;
+// Các bạn mèo (hàng trong friends_sheet.png): đến từ đâu, dừng ở đâu, dáng nghỉ, lúc xuất hiện
+const FRIENDS = [
+  { row: 0, from: 300, to: 192, y: 125, rest: 'sit', at: 5.2, s: 1,   pitch: .85 },  // Cam
+  { row: 1, from: -40, to: 90,  y: 125, rest: 'sit', at: 6.8, s: 1,   pitch: 1.1 },  // Bông
+  { row: 2, from: 300, to: 228, y: 119, rest: 'lie', at: 8.2, s: 1,   pitch: .75 },  // Mun
+  { row: 3, from: -50, to: 52,  y: 120, rest: 'sit', at: 9.4, s: 1,   pitch: 1 },    // Tam thể
+  { row: 4, from: 300, to: 162, y: 132, rest: 'lie', at: 10.6, s: .8, pitch: 1.45 }, // Kem (mèo con)
+];
+const FCOL = { walk: 0, sit: 4, blink: 5, lie: 6, sleep: 7 };
+function friendSpr(row, pose, frame, cx, bottom, opt) {
+  const S0 = SHEET.cell, col = pose === 'walk' ? frame & 3 : FCOL[pose];
+  drawImg(IMG.friends_sheet, col * S0, row * S0, S0, S0, cx, bottom, [S0 * (opt.s || 1), S0 * (opt.s || 1)], opt);
+}
+function meowP(t, v, p) { // tiếng meo với cao độ khác nhau cho từng bạn
+  const o = AC.createOscillator(), g = AC.createGain(), f = AC.createBiquadFilter();
+  o.type = 'sawtooth'; f.type = 'bandpass'; f.frequency.value = 1400 * p; f.Q.value = 3;
+  o.frequency.setValueAtTime(520 * p, t); o.frequency.linearRampToValueAtTime(820 * p, t + .12); o.frequency.linearRampToValueAtTime(480 * p, t + .4);
+  g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(v, t + .05); g.gain.linearRampToValueAtTime(0, t + .42);
+  o.connect(f); f.connect(g); g.connect(master); o.start(t); o.stop(t + .45);
+}
+function enterValley() {
+  const t0 = nowA(), bt = .75;
+  // lúc đầu chỉ vài nốt lẻ loi; bạn đến thì hoà âm đầy dần
+  [0, 2, 4, 6].forEach((b, i) => at(t0 + 1 + b * bt, tt => musicbox(SONG[i] - 12, tt, .07)));
+  at(t0 + 4.2, tt => meowP(tt, .05, 1));
+  const chords = PROG.concat([[60, 64, 67]]);
+  chords.forEach((c, i) => at(t0 + 5.2 + i * 4 * bt * .9, tt => pad(c.map(m => m - 12), tt, 4 * bt, .02 + Math.min(i, 4) * .004)));
+  SONG.forEach((m, i) => at(t0 + 5.2 + SONG_BEATS[i] * bt * .9, tt => musicbox(m - 12, tt, .09)));
+  FRIENDS.forEach(f => {
+    const dur = Math.abs(f.to - f.from) / 46;
+    at(t0 + f.at + dur - .1, tt => { meowP(tt, .045, f.pitch); musicbox(SCALE[(f.row + 3) % 8], tt + .25, .07); });
+  });
+  at(t0 + 12.4, tt => purr(tt, 4.5, .07));
+  at(t0 + 15.4, tt => sweep(tt));
+  if (SPECIAL) for (let i = 0; i < 9; i++) at(t0 + 18 + i * .6, tt => pluck(SCALE[(i * 3) % 8] + 12, tt, .07));
+  S = { t0, fw: 0, hearts: [], popped: {}, fs: 1 };
+}
+function updateValley(dt) {
+  const k = nowA() - S.t0;
+  // Đụt nhìn quanh khi còn một mình
+  const face = k > 3.8 && k < 4.6 ? -1 : 1;
+  S.fs += (face - S.fs) * Math.min(1, dt * 9);
+  FRIENDS.forEach((f, i) => {
+    const dur = Math.abs(f.to - f.from) / 46;
+    if (k > f.at + dur && !S.popped[i]) { S.popped[i] = 1; S.hearts.push({ x: (f.to + DUT_X) / 2, y: 100, t: k }); }
+  });
+  if (k > 12.4 && k < 13.4 && !S.blinkH) { S.blinkH = 1; [70, 100, 128, 156, 190].forEach((x, j) => S.hearts.push({ x, y: 102 - j % 2 * 6, t: k + j * .15 })); }
+  S.hearts = S.hearts.filter(h => k - h.t < 2.4);
+  if (SPECIAL && k > 18 && k < 23.5) {
+    S.fw -= dt;
+    if (S.fw <= 0) { S.fw = .6; burst(40 + Math.random() * 176, 16 + Math.random() * 30, 30, BALL_RGB.map(rgb), 48, 1.3); }
+  }
+}
+function drawValley() {
+  const k = nowA() - S.t0, t = nowA();
+  drawBackdrop(GOLD, 1, 0, t, { planet: false, sun: true, starA: .35, aurora: .5 });
+  // Trái Đất
+  const ea = clamp((k - 14.2) / 1.6);
+  if (ea > 0) {
+    glow(206, 30, 22, [140, 200, 255], .35 * ea);
+    ctx.globalAlpha = ea;
+    for (let y = -8; y <= 8; y++) for (let x = -8; x <= 8; x++) {
+      const d = x * x + y * y; if (d > 64) continue;
+      rect(206 + x, 30 + y, 1, 1, d > 49 ? '#3d6fb0' : ((x * 3 + y * 5 + 40) % 7 < 3 ? '#6ec878' : '#5c9cec'));
+    }
+    rect(203, 26, 2, 1, '#ffffff'); ctx.globalAlpha = 1;
+  }
+  // đồng cỏ
+  rect(0, GV, W, H - GV, '#a7bd6c'); rect(0, GV, W, 1, '#fff4b8'); rect(0, GV + 1, W, 2, '#bcd47a');
+  for (let y = GV + 6; y < H; y += 5) for (let x = (y * 7) % 9; x < W; x += 9) rect(x, y, 1, 2, '#93ab5c');
+  for (let x = 2; x < W; x += 4) { const h = 2 + (x * 7 % 3); rect(x, GV - h, 1, h, '#8aa25a'); }
+  for (let i = 0; i < 18; i++) { const x = (i * 37) % W, c = BALL_RGB[i % 5], y = GV + (i * 13 % 20); rect(x, y - 5, 1, 5, '#7a9a4a'); rect(x - 1, y - 6, 3, 1, rgb(c)); rect(x, y - 7, 1, 3, rgb(c)); }
+  // các chú mèo, vẽ từ sau ra trước
+  const list = FRIENDS.map((f, i) => ({ f, i, y: f.y })).concat([{ dut: 1, y: DUT_Y }]).sort((a, b) => a.y - b.y);
+  const slowBlink = k > 12.4 && k < 13.4;
+  list.forEach(o => {
+    if (o.dut) {
+      let x = DUT_X, pose = 'cat_sit', sy = 1, fsx = 1;
+      if (k < 3) { const d = 148 * easeOut(k / 3); x = -20 + d; pose = k > 2.7 ? 'cat_stand' : WALK4[Math.floor(d / 5) & 3]; }
+      else if (k < 3.5) pose = 'cat_stand';
+      else if (k > 14) pose = k > 17.2 ? 'cat_lie_blink' : 'cat_lie';
+      if (slowBlink) pose = k > 14 ? 'cat_lie_blink' : 'cat_sit_blink';
+      if (/sit|lie|stand/.test(pose)) sy = 1 + Math.sin(t * 2.2) * .02;
+      fsx = k >= 3 ? Math.sign(S.fs || 1) * Math.max(.18, Math.abs(S.fs)) : 1;
+      glow(x, DUT_Y - 10, 22, [255, 230, 200], .2);
+      shadow(x, DUT_Y, 0, .2);
+      cat(pose, x, DUT_Y, { sx: fsx, sy });
+      return;
+    }
+    const f = o.f, u0 = k - f.at; if (u0 < 0) return;
+    const dur = Math.abs(f.to - f.from) / 46, u = clamp(u0 / dur);
+    const x = lerp(f.from, f.to, easeOut(u)), moving = u < 1;
+    let pose = moving ? 'walk' : f.rest, frame = Math.floor(Math.abs(x - f.from) / 5);
+    const dirMove = Math.sign(f.to - f.from), dirRest = Math.sign(DUT_X - f.to) || 1;
+    if (!moving) {
+      const ph = (t * .37 + f.row * .23) % 1;
+      if (f.rest === 'sit' && ph < .07) pose = 'blink';
+      if (slowBlink) pose = f.rest === 'sit' ? 'blink' : 'sleep';
+      if (f.row === 4 && k > 15) pose = 'sleep';
+      if (f.row === 2 && k > 16) pose = 'sleep';
+    }
+    const sy = !moving ? 1 + Math.sin(t * 2.2 + f.row) * .02 : 1;
+    shadow(x, f.y, 0, .18);
+    friendSpr(f.row, pose, frame, x, f.y, { s: f.s, sx: moving ? dirMove : dirRest, sy });
+  });
+  // tim nhỏ bay lên
+  S.hearts.forEach(h => { const u = (k - h.t) / 2.4; if (u < 0) return; heart(Math.round(h.x + Math.sin(u * 6) * 2), Math.round(h.y - u * 22), '#f07a90', clamp(Math.min(u * 6, (1 - u) * 2))); });
+  // lúc đầu hơi lạnh và cô đơn, ấm dần khi các bạn tới
+  const arrived = FRIENDS.filter((f, i) => S.popped[i]).length;
+  S.cold = (S.cold ?? 1) + (((5 - arrived) / 5) - (S.cold ?? 1)) * .02;
+  if (S.cold > .01) { ctx.globalAlpha = .28 * S.cold; rect(0, 0, W, H, '#4a5a90'); ctx.globalAlpha = 1; }
+  // sao băng Đụt gửi về Trái Đất
+  if (k > 15.4 && k < 17) {
+    const u = (k - 15.4) / 1.6;
+    const sx = DUT_X + 6 + (206 - DUT_X - 6) * u, sy = 108 + (30 - 108) * u - Math.sin(u * Math.PI) * 12;
+    glow(sx, sy, 10, [255, 250, 220], .6);
+    for (let i = 0; i < 7; i++) rect(sx - i * 2 * (1 - u * .3), sy + i * 1.8, 1, 1, i ? '#fff3c4' : '#ffffff');
+    if (Math.random() < .5) burst(sx, sy, 1, ['#fff3c4'], 6, .5);
+  }
+  if (k > 17 && !S.sparked) { S.sparked = 1; burst(206, 30, 24, ['#ffffff', '#fff3c4', '#6ec878'], 30, 1); }
+  drawMotes(1, 0, t, [255, 240, 200]);
+  drawParts();
+  const ta = clamp((k - 18) / 1.5);
+  if (ta > 0) { heart(128, 10, '#e86a7a', ta); text('Đụt', 128, 25, 20, '#5a2f4a', ta); text('4/5/2026', 128, 37, 12, '#7a4a5a', ta); }
+  if (k > 20) paw(128, 140, '#5a2f4a', .3 + .3 * Math.sin(nowP() * 3));
+}
+
+/* ---------------- Vòng lặp ---------------- */
+let last = nowP();
+function frame() {
+  const t = nowP(), dt = Math.min(.05, t - last); last = t;
+  runQueue();
+  fade += (fadeTarget - fade) * Math.min(1, dt * 4);
+  if (nextScene && fade > .97) { enter(nextScene); nextScene = null; fadeTarget = 0; }
+  if (scene === 'world') updateWorld(dt);
+  if (scene === 'room') updateRoom(dt);
+  if (scene === 'valley') updateValley(dt);
+  updateParts(dt);
+  if (scene === 'title') drawTitle(t);
+  else if (scene === 'world') drawWorld();
+  else if (scene === 'room') drawRoom();
+  else if (scene === 'valley') drawValley();
+  if (fade > .01) { ctx.globalAlpha = fade; rect(0, 0, W, H, fadeColor); ctx.globalAlpha = 1; }
+  requestAnimationFrame(frame);
+}
+rect(0, 0, W, H, VOID);
+Promise.all([loadSprites(), document.fonts ? document.fonts.load('16px VT323').catch(() => {}) : 0])
+  .then(() => { enter('title'); frame(); });
+</script>
+</body>
+</html>

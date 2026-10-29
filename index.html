@@ -51,6 +51,7 @@
 const SPRITES = {
   dut_sheet:     'sprites/dut_sheet.png',      // toàn bộ khung hình của Đụt (xem SHEET bên dưới)
   friends_sheet: 'sprites/friends_sheet.png',  // các bạn mèo ở màn cuối: mỗi hàng một bạn
+  court_people:  'sprites/court_people.png',   // ký ức sân bóng rổ: hàng 0 nam, hàng 1 nữ (ô 40x64)
   people_sheet:  'sprites/people_sheet.png',   // người trong ký ức tủ lạnh: hàng 0 nữ, hàng 1 nam (ô 40x84)
   box_base:      'sprites/box_base.png',       // thân hộp giày
   box_lid:       'sprites/box_lid.png',        // nắp hộp giày
@@ -543,6 +544,7 @@ function enter(name) {
   if (name === 'title') S = { t0: nowP() };
   if (name === 'world') enterWorld();
   if (name === 'room') enterRoom();
+  if (name === 'court') enterCourt();
   if (name === 'valley') enterValley();
 }
 
@@ -595,6 +597,7 @@ function press() {
     audioInit(); meow(AC.currentTime + .05, .05); go('world'); return true;
   }
   if (scene === 'world' && S.phase === 'wake') { wakeTap(); return true; }
+  if (scene === 'court') return true;   // cảnh chỉ xem
   if (scene === 'valley') { if (nowA() - S.t0 > 20) go('title'); return true; }
   return false;
 }
@@ -1051,7 +1054,7 @@ function updateRoom(dt) {
   S.tint += ((S.cur ? 1 : 0) - S.tint) * Math.min(1, dt * 2.2);
   if (S.doorT && t > S.doorT + .6 && !S.exit && c.on && c.y === RF && c.x > 246) { S.exit = t; }
   if (S.exit) { c.x = Math.min(RW - 18, c.x + 22 * dt); c.vx = 22; c.dist += 22 * dt; }
-  if (S.exit && t - S.exit > 1.8 && !nextScene) go('valley', '#fff6e4');
+  if (S.exit && t - S.exit > 1.8 && !nextScene) go('court', '#fff6e4');
   S.prints = S.prints.filter(p => t - p.t < 8);
   let focus = c.x + c.vx * .3;
   if (S.cur && S.cur.id === 'fridge') { const k = t - S.curT; if (k < 8) focus = personState(k).x; }
@@ -1257,6 +1260,113 @@ function drawRoom() {
   }
 }
 
+/* ---------------- Ký ức: sân bóng rổ (chỉ xem, không điều khiển) ----------------
+   Bố cục theo ảnh: trời sao, sân bóng rổ ở giữa, trụ bóng rổ bên phải, khối ghế đá phía trước bên trái, cỏ hai bên.
+   Người nam ngồi bên trái, Đụt ở giữa, người nữ bên phải. */
+const COURT_GROUND = 138, SEAT = 125;
+const SEATS = { m: 70, dut: 112, f: 154 };
+const CSTARS = Array.from({ length: 60 }, (_, i) => ({ x: (i * 97) % 256, y: (i * 37) % 64, p: i * 1.3, big: i % 9 === 0 }));
+function enterCourt() {
+  const t0 = nowA();
+  S = { t0, hearts: [] };
+  // nhạc nền êm + tiếng dế
+  PROG.forEach((c, i) => at(t0 + .3 + i * 1.8, tt => pad(c.map(m => m - 12), tt, 2.2, .026)));
+  SONG.slice(0, 15).forEach((m, i) => at(t0 + .8 + SONG_BEATS[i] * .5, tt => musicbox(m - 12, tt, .06)));
+  for (let i = 0; i < 28; i++) at(t0 + .5 + i * .52 + (i % 3) * .07, tt => { tone(100, tt, .05, { type: 'sine', vol: .012 }); tone(100, tt + .07, .05, { type: 'sine', vol: .012 }); });
+  at(t0 + 1.7, tt => purr(tt, 3, .06));
+  at(t0 + 3.6, tt => meow(tt, .05));
+  at(t0 + 8.6, tt => sweep(tt));
+  at(t0 + 11, tt => meow(tt, .05));
+}
+function updateCourt(dt) {
+  const k = nowA() - S.t0;
+  [[2.2, SEATS.dut - 4], [6, SEATS.dut + 6], [11.2, SEATS.dut], [11.8, SEATS.m], [12.2, SEATS.f]].forEach(([at_, x], i) => {
+    if (k > at_ && !S.hearts.some(h => h.i === i)) S.hearts.push({ i, x, y: SEAT - 30, t: k });
+  });
+  if (k > 14.2 && !nextScene) go('valley', '#fff6e4');
+}
+function courtPersonCol(sex, k) {
+  if (k > 8.8 && k < 10.6) return 3;                         // cùng ngước nhìn sao băng
+  if (sex === 'm' && k > 1.4 && k < 3.2) return 2;           // anh vuốt đầu Đụt
+  if (sex === 'f' && k > 5.4 && k < 7.2) return 2;           // chị vuốt lưng Đụt
+  if ((k > 3.6 && k < 5.2) || k > 10.8) return (Math.floor(k * 3) + (sex === 'f' ? 1 : 0)) % 4 < 3 ? 1 : 0;  // cười vui
+  return 0;
+}
+function drawCourt() {
+  const k = nowA() - S.t0, t = nowA();
+  // trời đêm
+  for (let y = 0; y < 90; y += 2) rect(0, y, W, 2, mix('#0b0d22', '#28284a', y / 90));
+  CSTARS.forEach(s => {
+    const a = .4 + .6 * (.5 + .5 * Math.sin(t * 2 + s.p));
+    ctx.globalAlpha = a; rect(s.x, s.y, 1, 1, '#fff6dc');
+    if (s.big) { ctx.globalAlpha = a * .6; rect(s.x - 2, s.y, 5, 1, '#fff6dc'); rect(s.x, s.y - 2, 1, 5, '#fff6dc'); }
+  });
+  ctx.globalAlpha = 1;
+  [[46, 12], [86, 6], [170, 8], [238, 12], [196, 26], [128, 18]].forEach(([x, y], i) => {   // sao bốn cánh như trong ảnh
+    const s = 2 + Math.round(1 + Math.sin(t * 1.6 + i));
+    ctx.globalAlpha = .9; rect(x - s, y, s * 2 + 1, 1, '#ffffff'); rect(x, y - s, 1, s * 2 + 1, '#ffffff');
+    rect(x - 1, y - 1, 3, 3, '#fff6dc'); glow(x, y, 8, [255, 240, 200], .25); ctx.globalAlpha = 1;
+  });
+  // sao băng
+  if (k > 8.6 && k < 9.8) {
+    const u = (k - 8.6) / 1.2, sx = 230 - u * 170, sy = 8 + u * 30;
+    for (let i = 0; i < 12; i++) { ctx.globalAlpha = (1 - i / 12) * (1 - u * .5); rect(sx + i * 2, sy - i * .35 * 2, 2, 1, '#fff6dc'); }
+    ctx.globalAlpha = 1; glow(sx, sy, 8, [255, 250, 220], .6);
+  }
+  // hàng cây xa
+  hillLayer(80, 3, .07, .15, 0, '#141a2c');
+  for (let x = 6; x < W; x += 22) treeSil(x, 80 + Math.sin(x) * 2, 7 + (x % 3), '#141a2c');
+  // cỏ
+  rect(0, 84, W, H - 84, '#1f3a2c');
+  for (let y = 88; y < H; y += 4) for (let x = (y * 5) % 7; x < W; x += 7) rect(x, y, 1, 2, '#2c5039');
+  // đèn sân
+  rect(14, 30, 2, 64, '#2a2e3a'); rect(10, 28, 10, 3, '#3a3f4e'); rect(11, 31, 8, 1, '#fff2c8');
+  glow(15, 32, 70, [255, 230, 170], .22);
+  // sân bóng rổ (hình bình hành phối cảnh)
+  ctx.fillStyle = '#3c5a86';
+  ctx.beginPath(); ctx.moveTo(44, 88); ctx.lineTo(236, 88); ctx.lineTo(252, 112); ctx.lineTo(18, 112); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = 'rgba(255,240,200,.08)'; ctx.fillRect(18, 88, 240, 24);
+  const line = (x0, y0, x1, y1) => { const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0)); for (let i = 0; i <= n; i++) rect(x0 + (x1 - x0) * i / n, y0 + (y1 - y0) * i / n, 1, 1, '#e8eef8'); };
+  line(44, 88, 236, 88); line(236, 88, 252, 112); line(252, 112, 18, 112); line(18, 112, 44, 88);
+  line(135, 88, 135, 112);
+  for (let i = 0; i < 40; i++) { const a = i / 40 * Math.PI * 2; rect(135 + Math.cos(a) * 12, 100 + Math.sin(a) * 4, 1, 1, '#e8eef8'); }
+  line(206, 94, 226, 94); line(226, 94, 232, 106); line(232, 106, 212, 106); line(212, 106, 206, 94);
+  // trụ bóng rổ
+  rect(218, 34, 2, 72, '#cfd4de'); rect(218, 34, 1, 72, '#ffffff');
+  rect(200, 14, 30, 20, '#e8eef8'); rect(201, 15, 28, 18, '#2a3550'); rect(209, 22, 12, 8, '#e8eef8'); rect(210, 23, 10, 6, '#2a3550');
+  rect(208, 34, 14, 2, '#f08a3a'); rect(207, 35, 16, 1, '#c86a28');
+  for (let i = 0; i < 5; i++) { const sw = Math.sin(t * 2 + i) * .5; rect(209 + i * 3 + sw, 36, 1, 6 - Math.abs(i - 2), '#ffffff'); }
+  rect(212, 41, 6, 1, '#ffffff');
+  // đom đóm trên cỏ
+  for (let i = 0; i < 14; i++) {
+    const x = (i * 53 + Math.sin(t * .5 + i) * 10) % W, y = 116 + (i * 17) % 24 + Math.sin(t + i * 2) * 3;
+    rect(x, y, 1, 1, '#e8ff9a'); glow(x, y, 4, [220, 255, 150], .3 * (.5 + .5 * Math.sin(t * 3 + i)));
+  }
+  // khối ghế đá
+  rect(42, SEAT - 5, 144, 5, '#b4b8c2'); rect(42, SEAT - 5, 144, 1, '#d4d8e0');
+  rect(46, SEAT, 136, COURT_GROUND - SEAT, '#8a8f9a'); rect(182, SEAT - 4, 6, COURT_GROUND - SEAT + 4, '#6c707a');
+  rect(46, SEAT, 136, 1, '#6c707a'); for (let x = 54; x < 180; x += 17) rect(x, SEAT + 4 + (x % 3), 2, 1, '#7a7f8a');
+  shadow(114, COURT_GROUND + 2, 0, .3);
+  // ba người bạn
+  const pc = sex => courtPersonCol(sex, k);
+  const bob = sex => (pc(sex) === 1 ? -Math.abs(Math.round(Math.sin(t * 9))) : 0);
+  drawImg(IMG.court_people, pc('m') * 40, 0, 40, 64, SEATS.m, COURT_GROUND + bob('m'), [40, 64], {});
+  drawImg(IMG.court_people, pc('f') * 40, 64, 40, 64, SEATS.f, COURT_GROUND + bob('f'), [40, 64], {});
+  let dp = 'cat_sit';
+  if ((k > 1.6 && k < 3.2) || (k > 5.6 && k < 7.2)) dp = 'cat_sit_blink';
+  cat(dp, SEATS.dut, SEAT - 4, { sy: 1 + Math.sin(t * 2.2) * .02 });
+  // tim
+  S.hearts.forEach(h => { const u = (k - h.t) / 2.4; if (u < 0 || u > 1) return; heart(Math.round(h.x + Math.sin(u * 6) * 2), Math.round(h.y - u * 20), '#f07a90', clamp(Math.min(u * 6, (1 - u) * 2))); });
+  // lớp màu ký ức
+  ctx.globalAlpha = .12; rect(0, 0, W, H, '#ffcf9a'); ctx.globalAlpha = 1;
+  for (let i = 0; i < 30; i++) { ctx.globalAlpha = .1; rect(Math.random() * W, Math.random() * H, 1, 1, '#ffffff'); }
+  ctx.globalAlpha = 1;
+  rect(0, 0, W, 6, '#0a0910'); rect(0, H - 6, W, 6, '#0a0910');
+  const v = ctx.createRadialGradient(W / 2, H / 2, 60, W / 2, H / 2, 165);
+  v.addColorStop(0, 'rgba(10,8,20,0)'); v.addColorStop(1, 'rgba(10,8,20,.45)');
+  ctx.fillStyle = v; ctx.fillRect(0, 0, W, H);
+}
+
 /* ---------------- Màn kết: Thung lũng nắng — Đụt gặp các bạn mèo ---------------- */
 const GV = 118;
 const DUT_X = 128, DUT_Y = 127;
@@ -1396,11 +1506,13 @@ function frame() {
   if (nextScene && fade > .97) { enter(nextScene); nextScene = null; fadeTarget = 0; }
   if (scene === 'world') updateWorld(dt);
   if (scene === 'room') updateRoom(dt);
+  if (scene === 'court') updateCourt(dt);
   if (scene === 'valley') updateValley(dt);
   updateParts(dt);
   if (scene === 'title') drawTitle(t);
   else if (scene === 'world') drawWorld();
   else if (scene === 'room') drawRoom();
+  else if (scene === 'court') drawCourt();
   else if (scene === 'valley') drawValley();
   if (fade > .01) { ctx.globalAlpha = fade; rect(0, 0, W, H, fadeColor); ctx.globalAlpha = 1; }
   requestAnimationFrame(frame);

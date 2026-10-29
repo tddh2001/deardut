@@ -12,6 +12,7 @@ Mở file `index.html` bằng trình duyệt (Chrome, Edge, Firefox, Safari) là
 2. **Thức giấc:** mỗi lần chạm theo nhịp tim, Đụt chui ra khỏi hộp và Hành tinh Meo sáng dần lên: sao trời, cực quang, hành tinh có vành đai, đảo bay, nấm phát sáng.
 3. **Đồng cỏ bạc hà mèo:** đi cảnh 2D. Đụt nhảy qua vực và các đảo nổi, nhặt bóng màu; mỗi quả bóng là một nốt của bài hát của Đụt. Rơi xuống vực thì Đụt hiện lại ở đèn lồng gần nhất, không mất gì. Cuối màn là cổng ánh sáng.
 4. **Ký ức – căn phòng:** căn phòng quen thuộc với đồng hồ, tủ lạnh, khay vệ sinh, tủ bếp, bếp và cửa phòng ngủ. Có 5 dấu chân phát sáng, mỗi chỗ là một ký ức: đi vệ sinh rồi quay lại cào cát, hất quả bóng rồi đuổi theo vồ, ngồi nhìn đồng hồ chờ chủ về, nằm sưởi cạnh bếp, và chủ (ngẫu nhiên nam hoặc nữ) từ phòng ngủ bước ra, mở tủ lạnh lấy kem hoặc sữa chua rồi quỳ xuống cho Đụt ăn. Gom đủ 5 ký ức thì cửa phòng ngủ mở ra.
+4b. **Ký ức – sân bóng rổ (chỉ xem):** bước qua cánh cửa, Đụt ngồi trên ghế đá giữa hai người dưới trời sao: anh (áo xám xanh, quần đùi đen) bên trái, chị (áo thun be, quần đùi đen) bên phải. Hai người vuốt ve Đụt, cười đùa, rồi cả ba cùng ngước nhìn sao băng. Hình người ngồi ở `sprites/court_people.png` (ô 40×64; cột: mỉm cười, cười tít mắt, với tay vuốt Đụt, ngước nhìn trời).
 5. **Thung lũng nắng:** Đụt ngồi một mình nhìn quanh, rồi từng bạn mèo lần lượt tới ngồi, nằm cạnh. Cả nhóm cùng chớp mắt chậm, Đụt nằm xuống giữa các bạn và gửi sao băng về Trái Đất.
 
 Vào ngày 4/5 có thêm pháo hoa ở màn cuối. Muốn xem trước, mở `index.html#45`.

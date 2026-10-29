@@ -49,4 +49,9 @@ Lưu ý khi vẽ:
 
 Các hình khác vẫn là file riêng: `box_base.png` (thân hộp giày 40×22), `box_lid.png` (nắp hộp 44×7), `ball_*.png` (bóng 5 màu 10×10).
 
-Nhạc và âm thanh được tạo trực tiếp bằng code (Web Audio), không cần file âm thanh.
+## Nhạc nền
+Nhạc nền nằm ở `assets/background.mp3` và tự lặp lại khi hết bài. File đi kèm là bản piano + hộp nhạc soạn riêng từ "bài hát của Đụt" (khoảng 53 giây, lặp liền mạch).
+- Muốn đổi nhạc: thay file khác vào, **giữ nguyên tên** `background.mp3`.
+- Bật/tắt: bấm biểu tượng loa ở góc trên bên phải, hoặc nhấn phím **M**. Game nhớ lựa chọn cho lần sau.
+- Nhạc bắt đầu sau lần chạm/nhấn phím đầu tiên (trình duyệt không cho tự phát).
+- Khi nhạc nền đang phát, phần nhạc tổng hợp trong game tự tắt để không chồng lên nhau; các âm thanh như meo, gừ gừ, tiếng bóng vẫn giữ. Nếu thiếu file mp3, game tự quay về nhạc tổng hợp.

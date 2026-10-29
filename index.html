@@ -217,6 +217,41 @@ function drawParts(ox = 0) {
 
 /* ---------------- Âm thanh (tự tổng hợp) ---------------- */
 let AC = null, master, noiseBuf;
+/* ---------------- Nhạc nền (assets/background.mp3, tự lặp lại khi hết bài) ----------------
+   Muốn đổi nhạc: thay file assets/background.mp3 (giữ nguyên tên).
+   Khi nhạc nền đang phát, các đoạn nhạc tổng hợp trong game tự tắt để không chồng lên nhau;
+   hiệu ứng âm thanh (meo, gừ gừ, tiếng bóng...) vẫn giữ. Nút loa góc trên phải (hoặc phím M) để bật/tắt. */
+const BGM_SRC = 'assets/background.mp3';
+const BG = { el: null, on: true, ok: false };
+try { BG.on = localStorage.getItem('dut-bgm') !== 'off'; } catch (e) {}
+function bgmStart() {
+  if (!BG.el) {
+    BG.el = new Audio(BGM_SRC);
+    BG.el.loop = true; BG.el.volume = .5; BG.el.preload = 'auto';
+    BG.el.addEventListener('playing', () => { BG.ok = true; });
+    BG.el.addEventListener('ended', () => { BG.el.currentTime = 0; BG.el.play().catch(() => {}); });  // dự phòng nếu loop không chạy
+    BG.el.addEventListener('error', () => { BG.ok = false; });
+  }
+  if (BG.on) BG.el.play().catch(() => {});
+}
+function bgmToggle() {
+  BG.on = !BG.on;
+  try { localStorage.setItem('dut-bgm', BG.on ? 'on' : 'off'); } catch (e) {}
+  if (!BG.el) return;
+  if (BG.on) BG.el.play().catch(() => {}); else BG.el.pause();
+}
+const bgmPlaying = () => BG.on && BG.ok && BG.el && !BG.el.paused;
+const BGM_BTN = { x: W - 13, y: 2, w: 11, h: 10 };
+function drawBgmButton() {
+  if (!AC) return;
+  const { x, y } = BGM_BTN, a = .55;
+  ctx.globalAlpha = a;
+  rect(x + 1, y + 3, 2, 4, '#ffffff'); rect(x + 3, y + 2, 1, 6, '#ffffff'); rect(x + 4, y + 1, 1, 8, '#ffffff');
+  if (BG.on) { rect(x + 6, y + 3, 1, 4, '#ffffff'); rect(x + 8, y + 1, 1, 8, '#ffffff'); }
+  else { for (let i = 0; i < 4; i++) { rect(x + 6 + i, y + 3 + i, 1, 1, '#ffffff'); rect(x + 9 - i, y + 3 + i, 1, 1, '#ffffff'); } }
+  ctx.globalAlpha = 1;
+}
+
 function audioInit() {
   if (AC) { AC.resume(); return; }
   AC = new (window.AudioContext || window.webkitAudioContext)();
@@ -250,6 +285,7 @@ function thump(t, v = .45) {
   o.connect(g); g.connect(master); o.start(t); o.stop(t + .3);
 }
 function pad(ms, t, dur, v = .035) {
+  if (bgmPlaying()) return;   // nhạc nền mp3 đang phát thì bỏ phần nền tổng hợp
   ms.forEach(m => {
     const o = AC.createOscillator(), g = AC.createGain(), f = AC.createBiquadFilter();
     o.type = 'triangle'; o.frequency.value = mtof(m); o.detune.value = (Math.random() - .5) * 12;
@@ -570,6 +606,8 @@ function refreshTouch() {
   const j = z.includes('jump'); if (j && !keys.jump) jumpPressed = true; keys.jump = j;
 }
 cv.addEventListener('pointerdown', e => {
+  { const r = cv.getBoundingClientRect(), x = (e.clientX - r.left) / r.width * W, y = (e.clientY - r.top) / r.height * H;
+    if (AC && x >= BGM_BTN.x - 3 && y <= BGM_BTN.y + BGM_BTN.h + 3) { e.preventDefault(); bgmToggle(); return; } }
   e.preventDefault(); cv.focus({ preventScroll: true });
   if (e.pointerType === 'touch') touchMode = true;
   if (press()) return;
@@ -586,6 +624,7 @@ cv.addEventListener('pointermove', e => { if (touches.has(e.pointerId) && touche
 }));
 const KEYMAP = { ArrowLeft: 'left', a: 'left', A: 'left', ArrowRight: 'right', d: 'right', D: 'right', ' ': 'jump', ArrowUp: 'jump', w: 'jump', W: 'jump', z: 'jump', Z: 'jump', Enter: 'jump' };
 addEventListener('keydown', e => {
+  if ((e.key === 'm' || e.key === 'M') && !e.repeat) { if (AC) bgmToggle(); return; }
   const k = KEYMAP[e.key]; if (!k) return;
   e.preventDefault();
   if (e.repeat) return;
@@ -593,7 +632,10 @@ addEventListener('keydown', e => {
   keys[k] = true; if (k === 'jump') jumpPressed = true;
 });
 addEventListener('keyup', e => { const k = KEYMAP[e.key]; if (k) keys[k] = false; });
-document.addEventListener('visibilitychange', () => { if (AC) document.hidden ? AC.suspend() : AC.resume(); });
+document.addEventListener('visibilitychange', () => {
+  if (AC) document.hidden ? AC.suspend() : AC.resume();
+  if (BG.el && BG.on) document.hidden ? BG.el.pause() : BG.el.play().catch(() => {});
+});
 /* Chạm/nhấn dùng cho các cảnh không điều khiển nhân vật. Trả về true nếu đã xử lý. */
 function press() {
   if (nextScene || fade > .3) return true;
@@ -601,7 +643,7 @@ function press() {
     const k = nowP() - S.t0;
     if (k < 5.2) { S.t0 = nowP() - 5.2; return true; }
     if (k < 6.8) return true;
-    audioInit(); meow(AC.currentTime + .05, .05); go('world'); return true;
+    audioInit(); bgmStart(); meow(AC.currentTime + .05, .05); go('world'); return true;
   }
   if (scene === 'world' && S.phase === 'wake') { wakeTap(); return true; }
   if (scene === 'court' || scene === 'pate' || scene === 'hall') return true;   // cảnh chỉ xem
@@ -661,6 +703,7 @@ function worldMusic() {
       const nb = b; at(nb, () => { if (S.rings) S.rings.push(nowA()); });
     } else {
       const bar = (n / 4 | 0), c = bar % PROG.length;
+      if (bgmPlaying()) { S.nextBeat += BEAT; continue; }
       if (n % 4 === 0) { pad(PROG[c], b, 4 * BEAT * 1.1, .03); tone(ROOTS[c], b, 1.4, { vol: .09 }); }
       if (n % 4 === 2) tone(ROOTS[c] + 7, b, 1, { vol: .06 });
       const arp = PROG[c].concat(PROG[c][0] + 12);
@@ -994,7 +1037,7 @@ function roomMusic() {
   while (S.nextBeat < t + .2) {
     const b = S.nextBeat, n = S.beatN++, c = (n / 4 | 0) % PROG.length;
     if (n % 4 === 0) pad(PROG[c].map(m => m - 12), b, 4 * B * 1.1, S.cur ? .02 : .028);
-    if (!S.cur && n % 2 === 0) musicbox(SONG[(n / 2) % SONG.length] - 12, b, .045);
+    if (!S.cur && n % 2 === 0 && !bgmPlaying()) musicbox(SONG[(n / 2) % SONG.length] - 12, b, .045);
     S.nextBeat += B;
   }
 }
@@ -1251,12 +1294,12 @@ function drawRoom() {
   ctx.fillStyle = v; ctx.fillRect(0, 0, W, H);
   // ---- khung ký ức góc trên ----
   for (let i = 0; i < MEMS.length; i++) {
-    const sx = W - 12 - (MEMS.length - 1 - i) * 12, sy = 7 + (T > .01 ? Math.round(6 * ease(T)) : 0);
+    const sx = W - 26 - (MEMS.length - 1 - i) * 12, sy = 7 + (T > .01 ? Math.round(6 * ease(T)) : 0);
     rect(sx - 5, sy - 5, 11, 11, 'rgba(255,248,236,.55)'); rect(sx - 4, sy - 4, 9, 9, 'rgba(90,60,70,.35)');
   }
   S.flying.forEach(f => {
     const u = clamp((t - f.t) / 1), e = ease(u);
-    const sx = W - 12 - (MEMS.length - 1 - f.slot) * 12, sy = 7 + Math.round(6 * ease(T));
+    const sx = W - 26 - (MEMS.length - 1 - f.slot) * 12, sy = 7 + Math.round(6 * ease(T));
     const x = lerp(f.x, sx, e), y = lerp(f.y, sy, e) - Math.sin(u * Math.PI) * 18;
     if (u < 1) glow(x, y, 10, [255, 230, 180], .5 * (1 - u));
     icon(f.id, Math.round(x), Math.round(y));
@@ -1278,7 +1321,7 @@ function enterCourt() {
   S = { t0, hearts: [] };
   // nhạc nền êm + tiếng dế
   PROG.forEach((c, i) => at(t0 + .3 + i * 1.8, tt => pad(c.map(m => m - 12), tt, 2.2, .026)));
-  SONG.slice(0, 15).forEach((m, i) => at(t0 + .8 + SONG_BEATS[i] * .5, tt => musicbox(m - 12, tt, .06)));
+  SONG.slice(0, 15).forEach((m, i) => at(t0 + .8 + SONG_BEATS[i] * .5, tt => { if (!bgmPlaying()) musicbox(m - 12, tt, .06); }));
   for (let i = 0; i < 28; i++) at(t0 + .5 + i * .52 + (i % 3) * .07, tt => { tone(100, tt, .05, { type: 'sine', vol: .012 }); tone(100, tt + .07, .05, { type: 'sine', vol: .012 }); });
   at(t0 + 1.7, tt => purr(tt, 3, .06));
   at(t0 + 3.6, tt => meow(tt, .05));
@@ -1488,7 +1531,7 @@ function homeMusic() {
   while (S.nextBeat < t + .2) {
     const b = S.nextBeat, n = S.beatN++, c = (n / 4 | 0) % PROG.length;
     if (n % 4 === 0) pad(PROG[c].map(m => m - 12), b, 4 * B * 1.1, .024);
-    if (n % 2 === 0) musicbox(SONG[(n / 2) % SONG.length] - 12, b, .04);
+    if (n % 2 === 0 && !bgmPlaying()) musicbox(SONG[(n / 2) % SONG.length] - 12, b, .04);
     S.nextBeat += B;
   }
 }
@@ -1706,11 +1749,11 @@ function meowP(t, v, p) { // tiếng meo với cao độ khác nhau cho từng b
 function enterValley() {
   const t0 = nowA(), bt = .75;
   // lúc đầu chỉ vài nốt lẻ loi; bạn đến thì hoà âm đầy dần
-  [0, 2, 4, 6].forEach((b, i) => at(t0 + 1 + b * bt, tt => musicbox(SONG[i] - 12, tt, .07)));
+  [0, 2, 4, 6].forEach((b, i) => at(t0 + 1 + b * bt, tt => { if (!bgmPlaying()) musicbox(SONG[i] - 12, tt, .07); }));
   at(t0 + 4.2, tt => meowP(tt, .05, 1));
   const chords = PROG.concat([[60, 64, 67]]);
   chords.forEach((c, i) => at(t0 + 5.2 + i * 4 * bt * .9, tt => pad(c.map(m => m - 12), tt, 4 * bt, .02 + Math.min(i, 4) * .004)));
-  SONG.forEach((m, i) => at(t0 + 5.2 + SONG_BEATS[i] * bt * .9, tt => musicbox(m - 12, tt, .09)));
+  SONG.forEach((m, i) => at(t0 + 5.2 + SONG_BEATS[i] * bt * .9, tt => { if (!bgmPlaying()) musicbox(m - 12, tt, .09); }));
   FRIENDS.forEach(f => {
     const dur = Math.abs(f.to - f.from) / 46;
     at(t0 + f.at + dur - .1, tt => { meowP(tt, .045, f.pitch); musicbox(SCALE[(f.row + 3) % 8], tt + .25, .07); });
@@ -1834,6 +1877,7 @@ function frame() {
   else if (scene === 'hall') drawHall();
   else if (scene === 'valley') drawValley();
   if (fade > .01) { ctx.globalAlpha = fade; rect(0, 0, W, H, fadeColor); ctx.globalAlpha = 1; }
+  drawBgmButton();
   requestAnimationFrame(frame);
 }
 rect(0, 0, W, H, VOID);

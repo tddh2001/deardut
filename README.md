@@ -14,6 +14,7 @@ Mở file `index.html` bằng trình duyệt (Chrome, Edge, Firefox, Safari) là
 4. **Ký ức – căn phòng:** căn phòng quen thuộc với đồng hồ, tủ lạnh, khay vệ sinh, tủ bếp, bếp và cửa phòng ngủ. Có 5 dấu chân phát sáng, mỗi chỗ là một ký ức: đi vệ sinh rồi quay lại cào cát, hất quả bóng rồi đuổi theo vồ, ngồi nhìn đồng hồ chờ chủ về, nằm sưởi cạnh bếp, và chủ (ngẫu nhiên nam hoặc nữ) từ phòng ngủ bước ra, mở tủ lạnh lấy kem hoặc sữa chua rồi quỳ xuống cho Đụt ăn. Gom đủ 5 ký ức thì cửa phòng ngủ mở ra.
 4b. **Ký ức – sân bóng rổ (chỉ xem):** bước qua cánh cửa, Đụt ngồi trên ghế đá giữa hai người dưới trời sao: anh (áo xám xanh, quần đùi đen) bên trái, chị (áo thun be, quần đùi đen) bên phải. Hai người vuốt ve Đụt, cười đùa, rồi cả ba cùng ngước nhìn sao băng. Anh đeo kính. Hình người ngồi ở `sprites/court_people.png` (ô 40×64; cột: mỉm cười, cười tít mắt, với tay vuốt Đụt, ngước nhìn trời).
 4c. **Ký ức – hộp pate mới (chỉ xem):** trong phòng khách, chủ quỳ xuống bật nắp lon pate, đổ ra đĩa, Đụt chạy lại ăn ngon lành.
+4c2. **Ký ức – hành lang dãy trọ (chỉ xem):** anh đeo kính mặc áo đen dắt Đụt ra hành lang (3 cửa phòng, trên mỗi cửa có đồng hồ điện). Đụt hạ thấp người lấy đà rồi phi nước đại, kéo căng và làm đứt sợi xích sắt, phóng mất hút, anh vội đuổi theo. Hình anh áo đen ở `sprites/hall_man.png`.
 4d. **Ký ức – lần đầu về nhà (điều khiển anh):** phòng khách có cửa ra vào, cầu thang, sofa gỗ trắng và cửa WC. Đụt nằm trong giỏ nhựa đỏ, cổ đeo xích sắt. Chị ngồi trên sofa xem, một bé mèo cam chạy loanh quanh. Dùng ← → đưa anh tới cạnh giỏ rồi nhấn phím cách (hoặc chạm nửa phải màn hình) để bế Đụt ra. Hình anh ở `sprites/home_man.png` (ô 40×84, cột 9 là tư thế bế).
 5. **Thung lũng nắng:** Đụt ngồi một mình nhìn quanh, rồi từng bạn mèo lần lượt tới ngồi, nằm cạnh. Cả nhóm cùng chớp mắt chậm, Đụt nằm xuống giữa các bạn và gửi sao băng về Trái Đất.
 
@@ -23,7 +24,7 @@ Vào ngày 4/5 có thêm pháo hoa ở màn cuối. Muốn xem trước, mở `i
 Tất cả khung hình của Đụt nằm chung trong **một sprite sheet**: `sprites/dut_sheet.png`. Các khung được dựng từ ảnh Đụt pixel bạn vẽ: tư thế ngồi dùng nguyên ảnh gốc, các tư thế khác dùng đúng cái đầu trong ảnh gốc và vẽ thêm thân cùng bảng màu. Các bạn mèo là Đụt đổi bảng màu.
 Mở `sprite_guide.png` (bản phóng to có lưới và nhãn từng ô) để biết ô nào là tư thế nào.
 
-Sheet là lưới ô vuông 40×40 px, 4 cột, 7 hàng:
+Sheet là lưới ô vuông 40×40 px, 4 cột, 8 hàng:
 
 | Hàng | Nội dung | Ghi chú |
 |---|---|---|
@@ -34,6 +35,7 @@ Sheet là lưới ô vuông 40×40 px, 4 cột, 7 hàng:
 | 4 | Nhảy lên, rơi xuống, vươn vai, ngơ ngác | Mỗi tư thế 1 khung |
 | 5 | Đứng yên | 1 khung |
 | 6 | Cào cát, 4 khung | Cúi thấp, một chân trước giơ lên → với ra → gạt xuống → kéo về |
+| 7 | Chạy nhanh, 4 khung | Phi nước đại: duỗi dài → thu chân → chân trước tiếp đất → chân sau đạp đi |
 
 Lưu ý khi vẽ:
 - Đụt quay mặt sang **phải**, chân chạm **mép dưới** của ô. Khi đi sang trái game tự lật hình.

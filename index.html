@@ -220,7 +220,7 @@ let AC = null, master, noiseBuf;
 /* ---------------- Nhạc nền (assets/background.mp3, tự lặp lại khi hết bài) ----------------
    Muốn đổi nhạc: thay file assets/background.mp3 (giữ nguyên tên).
    Khi nhạc nền đang phát, các đoạn nhạc tổng hợp trong game tự tắt để không chồng lên nhau;
-   hiệu ứng âm thanh (meo, gừ gừ, tiếng bóng...) vẫn giữ. Nút loa góc trên phải (hoặc phím M) để bật/tắt. */
+   các hiệu ứng âm thanh khác (meo, gừ gừ, bước chân...) đã được tắt, chỉ còn nhạc nền. Nút loa góc trên phải (hoặc phím M) để bật/tắt. */
 const BGM_SRC = 'assets/background.mp3';
 const BG = { el: null, on: true, ok: false };
 try { BG.on = localStorage.getItem('dut-bgm') !== 'off'; } catch (e) {}
@@ -276,9 +276,9 @@ function tone(m, t, dur, { type = 'triangle', vol = .15, att = .005, cut = 0, gl
   g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vol, t + att); g.gain.exponentialRampToValueAtTime(.0001, t + dur);
   o.start(t); o.stop(t + dur + .05);
 }
-function pluck(m, t, v = .2) { tone(m, t, .6, { vol: v }); tone(m + 12, t, .3, { type: 'sine', vol: v * .5 }); tone(m, t, .25, { type: 'square', vol: v * .1, cut: 2200 }); }
+function pluck(m, t, v = .2) { return; /* đã tắt: chỉ giữ nhạc nền */ tone(m, t, .6, { vol: v }); tone(m + 12, t, .3, { type: 'sine', vol: v * .5 }); tone(m, t, .25, { type: 'square', vol: v * .1, cut: 2200 }); }
 function musicbox(m, t, v = .1) { tone(m + 12, t, 1.5, { type: 'sine', vol: v }); tone(m + 24, t, .5, { type: 'sine', vol: v * .25 }); }
-function thump(t, v = .45) {
+function thump(t, v = .45) { return;   // đã tắt: chỉ giữ nhạc nền
   const o = AC.createOscillator(), g = AC.createGain();
   o.type = 'sine'; o.frequency.setValueAtTime(110, t); o.frequency.exponentialRampToValueAtTime(45, t + .18);
   g.gain.setValueAtTime(v, t); g.gain.exponentialRampToValueAtTime(.0001, t + .25);
@@ -295,19 +295,19 @@ function pad(ms, t, dur, v = .035) {
     o.start(t); o.stop(t + dur + .05);
   });
 }
-function meow(t, v = .08) {
+function meow(t, v = .08) { return;   // đã tắt: chỉ giữ nhạc nền
   const o = AC.createOscillator(), g = AC.createGain(), f = AC.createBiquadFilter();
   o.type = 'sawtooth'; f.type = 'bandpass'; f.frequency.value = 1400; f.Q.value = 3;
   o.frequency.setValueAtTime(520, t); o.frequency.linearRampToValueAtTime(820, t + .12); o.frequency.linearRampToValueAtTime(480, t + .4);
   g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(v, t + .05); g.gain.linearRampToValueAtTime(0, t + .42);
   o.connect(f); f.connect(g); g.connect(master); o.start(t); o.stop(t + .45);
 }
-function sweep(t, dir = 1) {
+function sweep(t, dir = 1) { return;   // đã tắt: chỉ giữ nhạc nền
   const ns = [67, 69, 72, 74, 76, 79, 81, 84];
   (dir > 0 ? ns : ns.slice().reverse()).forEach((m, i) => musicbox(m - 12, t + i * .06, .06));
 }
-function sfxJump() { if (AC) tone(70, AC.currentTime, .14, { type: 'sine', vol: .06, glide: 7 }); }
-function sfxLand() { if (AC) thump(AC.currentTime, .08); }
+function sfxJump() { return; if (AC) tone(70, AC.currentTime, .14, { type: 'sine', vol: .06, glide: 7 }); }
+function sfxLand() { return; if (AC) thump(AC.currentTime, .08); }
 
 let queue = [];
 const at = (t, fn) => queue.push({ t, fn });
@@ -684,7 +684,6 @@ function wakeTap() {
   S.lastTap = t;
   const onBeat = Math.min(Math.abs(t - (S.nextBeat - BEAT)), Math.abs(S.nextBeat - t)) < .2;
   S.stage++;
-  musicbox(SCALE[S.stage - 1] - 12, t, onBeat ? .14 : .1);
   const cx = S.stage >= 4 ? BOX_X + 34 : BOX_X;
   burst(cx, 104, onBeat ? 16 : 7, onBeat ? ['#fff6c8', '#f6cc4c', '#ffffff', '#c8b8ff'] : ['#cfc8e6'], onBeat ? 45 : 25);
   if (S.stage === 3) S.lidAnim = t;
@@ -800,7 +799,7 @@ function updateWorld(dt) {
       }
     });
     LANTERNS.forEach(([lx], i) => {
-      if (!S.lit[i] && c.x > lx - 4) { S.lit[i] = true; S.check = i; musicbox(72, t, .08); musicbox(79, t + .08, .08); burst(lx, 106, 14, ['#ffe3a0', '#ffffff'], 30, .9); }
+      if (!S.lit[i] && c.x > lx - 4) { S.lit[i] = true; S.check = i; burst(lx, 106, 14, ['#ffe3a0', '#ffffff'], 30, .9); }
     });
     if (!S.exit && c.x > PORTAL_X - 4 && c.on) { S.exit = t; sweep(t); }
     if (S.exit && t - S.exit > 1.4 && !nextScene) { runGot = S.got; go('room', '#fff6e4'); }
@@ -930,13 +929,13 @@ function icon(id, x, y, a = 1) {
   I.p.forEach((row, j) => [...row].forEach((ch, i) => { if (ch !== '.') rect(x + i - 3, y + j - 3, 1, 1, I.c[ch]); }));
   ctx.globalAlpha = 1;
 }
-function scratch(t, v = .05) {
+function scratch(t, v = .05) { return;   // đã tắt: chỉ giữ nhạc nền
   const s = AC.createBufferSource(), f = AC.createBiquadFilter(), g = AC.createGain();
   s.buffer = noiseBuf; f.type = 'bandpass'; f.frequency.value = 2600; f.Q.value = 1.2;
   g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(v, t + .02); g.gain.exponentialRampToValueAtTime(.0001, t + .13);
   s.connect(f); f.connect(g); g.connect(master); s.start(t); s.stop(t + .15);
 }
-function purr(t, dur, v = .08) { // tiếng gừ gừ
+function purr(t, dur, v = .08) { return;   // đã tắt: chỉ giữ nhạc nền // tiếng gừ gừ
   const s = AC.createBufferSource(), f = AC.createBiquadFilter(), g = AC.createGain(), e = AC.createGain();
   const lfo = AC.createOscillator(), lg = AC.createGain();
   s.buffer = noiseBuf; s.loop = true; f.type = 'lowpass'; f.frequency.value = 260;
@@ -945,7 +944,7 @@ function purr(t, dur, v = .08) { // tiếng gừ gừ
   s.connect(f); f.connect(g); g.connect(e); e.connect(master);
   s.start(t); lfo.start(t); s.stop(t + dur + .05); lfo.stop(t + dur + .05);
 }
-const tick = (t, v = .03) => tone(98, t, .05, { type: 'square', vol: v, cut: 3500 });
+const tick = () => {};   // đã tắt
 
 /* --- kịch bản chuyển động trong các ký ức --- */
 function kf(keys, t, fn = ease) {
@@ -1056,17 +1055,13 @@ function startMem(m, t) {
   }
   if (m.id === 'clock') {
     for (let i = 0; i < 26; i++) at(t + .3 + 4.6 * Math.pow(i / 26, .7), tt => tick(tt));
-    at(t + 5, tt => { musicbox(72, tt, .1); musicbox(79, tt + .15, .1); meow(tt + .4, .06); });
   }
   if (m.id === 'stove') { at(t + .5, tt => purr(tt, 5.2)); at(t + .3, tt => pad([64, 67, 72], tt, 5, .03)); }
   if (m.id === 'fridge') {
     S.who = Math.random() < .5 ? 0 : 1;                       // 0: nữ, 1: nam
     S.treat = Math.random() < .5 ? 'yogurt' : 'icecream';
     at(t + .2, tt => sweep(tt));
-    for (let i = 0; i < 10; i++) at(t + 1.1 + i * .46, tt => tone(52, tt, .08, { type: 'sine', vol: .05 }));   // tiếng bước chân
     at(t + 3.8, tt => meow(tt, .06));
-    at(t + 5.95, tt => { tone(60, tt, .3, { type: 'sine', vol: .04 }); musicbox(84, tt + .1, .07); });
-    at(t + 6.6, tt => musicbox(88, tt, .08));
     at(t + 8.6, tt => meow(tt, .06));
     at(t + 9.5, tt => purr(tt, 4.6, .08));
   }
@@ -1097,7 +1092,6 @@ function updateRoom(dt) {
     if (k > m.dur) {
       m.done = true; S.cur = null; S.doneN++;
       S.flying.push({ id: m.id, t, x: c.x - S.cam, y: c.y - 24, slot: S.doneN - 1 });
-      musicbox(SCALE[S.doneN + 1], t, .1);
       if (S.doneN === MEMS.length) { S.doorT = t + 1.2; at(t + 1.2, tt => { sweep(tt); meow(tt + .8, .05); }); }
     }
   }
@@ -1322,7 +1316,6 @@ function enterCourt() {
   // nhạc nền êm + tiếng dế
   PROG.forEach((c, i) => at(t0 + .3 + i * 1.8, tt => pad(c.map(m => m - 12), tt, 2.2, .026)));
   SONG.slice(0, 15).forEach((m, i) => at(t0 + .8 + SONG_BEATS[i] * .5, tt => { if (!bgmPlaying()) musicbox(m - 12, tt, .06); }));
-  for (let i = 0; i < 28; i++) at(t0 + .5 + i * .52 + (i % 3) * .07, tt => { tone(100, tt, .05, { type: 'sine', vol: .012 }); tone(100, tt + .07, .05, { type: 'sine', vol: .012 }); });
   at(t0 + 1.7, tt => purr(tt, 3, .06));
   at(t0 + 3.6, tt => meow(tt, .05));
   at(t0 + 8.6, tt => sweep(tt));
@@ -1476,12 +1469,9 @@ function enterPate() {
   const t0 = nowA();
   S = { t0, who: Math.random() < .5 ? 0 : 1, hearts: [] };
   PROG.forEach((c, i) => at(t0 + .3 + i * 1.6, tt => pad(c.map(m => m - 12), tt, 2, .024)));
-  at(t0 + 1.5, tt => { tone(88, tt, .05, { type: 'square', vol: .05, cut: 3000 }); tone(64, tt + .02, .12, { type: 'sine', vol: .08, glide: -12 }); });  // bật nắp "tách"
   at(t0 + 2.3, tt => scratch(tt, .04)); at(t0 + 2.6, tt => scratch(tt, .04));
   at(t0 + 2.9, tt => meow(tt, .06));
-  for (let i = 0; i < 14; i++) at(t0 + 3.8 + i * .42, tt => tone(70 + (i % 2) * 2, tt, .05, { type: 'sine', vol: .03 }));   // tiếng nhai
   at(t0 + 4.2, tt => purr(tt, 6, .07));
-  at(t0 + 10.4, tt => musicbox(84, tt, .08));
 }
 function updatePate(dt) {
   const k = nowA() - S.t0;
@@ -1649,11 +1639,7 @@ function enterHall() {
   const t0 = nowA();
   S = { t0, snapped: false };
   PROG.forEach((c, i) => at(t0 + .3 + i * 1.3, tt => pad(c.map(m => m - 12), tt, 1.6, .022)));
-  for (let i = 0; i < 6; i++) at(t0 + .4 + i * .4, tt => tone(52, tt, .07, { type: 'sine', vol: .045 }));        // bước chân
-  for (let i = 0; i < 9; i++) at(t0 + 3.2 + i * .13, tt => tone(96 + (i % 3), tt, .04, { type: 'triangle', vol: .03 }));  // xích rung leng keng
   at(t0 + 2.7, tt => meowP(tt, .05, 1.2));
-  at(t0 + 4.4, tt => { tone(100, tt, .09, { type: 'square', vol: .06, cut: 5000 }); tone(91, tt + .03, .25, { type: 'triangle', vol: .06 }); scratch(tt, .08); });   // "tách!"
-  for (let i = 0; i < 10; i++) at(t0 + 4.5 + i * .11, tt => tone(56, tt, .04, { type: 'sine', vol: .03 }));     // chân Đụt chạy
   at(t0 + 5.2, tt => sweep(tt, -1));
 }
 function updateHall(dt) {
@@ -1739,7 +1725,7 @@ function friendSpr(row, pose, frame, cx, bottom, opt) {
   const S0 = SHEET.cell, col = pose === 'walk' ? frame & 3 : FCOL[pose];
   drawImg(IMG.friends_sheet, col * S0, row * S0, S0, S0, cx, bottom, [S0 * (opt.s || 1), S0 * (opt.s || 1)], opt);
 }
-function meowP(t, v, p) { // tiếng meo với cao độ khác nhau cho từng bạn
+function meowP(t, v, p) { return;   // đã tắt: chỉ giữ nhạc nền // tiếng meo với cao độ khác nhau cho từng bạn
   const o = AC.createOscillator(), g = AC.createGain(), f = AC.createBiquadFilter();
   o.type = 'sawtooth'; f.type = 'bandpass'; f.frequency.value = 1400 * p; f.Q.value = 3;
   o.frequency.setValueAtTime(520 * p, t); o.frequency.linearRampToValueAtTime(820 * p, t + .12); o.frequency.linearRampToValueAtTime(480 * p, t + .4);
@@ -1756,7 +1742,7 @@ function enterValley() {
   SONG.forEach((m, i) => at(t0 + 5.2 + SONG_BEATS[i] * bt * .9, tt => { if (!bgmPlaying()) musicbox(m - 12, tt, .09); }));
   FRIENDS.forEach(f => {
     const dur = Math.abs(f.to - f.from) / 46;
-    at(t0 + f.at + dur - .1, tt => { meowP(tt, .045, f.pitch); musicbox(SCALE[(f.row + 3) % 8], tt + .25, .07); });
+    at(t0 + f.at + dur - .1, tt => meowP(tt, .045, f.pitch));
   });
   at(t0 + 12.4, tt => purr(tt, 4.5, .07));
   at(t0 + 15.4, tt => sweep(tt));

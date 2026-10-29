@@ -51,6 +51,7 @@
 const SPRITES = {
   dut_sheet:     'sprites/dut_sheet.png',      // toàn bộ khung hình của Đụt (xem SHEET bên dưới)
   friends_sheet: 'sprites/friends_sheet.png',  // các bạn mèo ở màn cuối: mỗi hàng một bạn
+  people_sheet:  'sprites/people_sheet.png',   // người trong ký ức tủ lạnh: hàng 0 nữ, hàng 1 nam (ô 40x84)
   box_base:      'sprites/box_base.png',       // thân hộp giày
   box_lid:       'sprites/box_lid.png',        // nắp hộp giày
   ball_red:      'sprites/ball_red.png',
@@ -72,12 +73,13 @@ const SHEET = {
     stretch:   { row: 4, frames: [2] },
     dazed:     { row: 4, frames: [3] },
     stand:     { row: 5, frames: [0] },
+    scratch:   { row: 6, frames: [0, 1, 2, 3], fps: 6 },             // cúi thấp, một chân trước cào gạt cát
   },
 };
 // tên tư thế dùng trong code → hoạt ảnh trong sheet
 const POSE = {
   cat_walk_1: ['walk', 0], cat_walk_3: ['walk', 1], cat_walk_2: ['walk', 2], cat_walk_4: ['walk', 3],
-  cat_sit: 'sit', cat_sit_blink: ['sit', 2], cat_lie: 'lie', cat_lie_blink: 'lie_blink', cat_eat: 'eat', cat_stand: 'stand',
+  cat_sit: 'sit', cat_sit_blink: ['sit', 2], cat_lie: 'lie', cat_lie_blink: 'lie_blink', cat_eat: 'eat', cat_stand: 'stand', cat_scratch: 'scratch',
   cat_jump: 'jump_up', cat_pounce: 'jump_up', cat_jump_down: 'jump_down', cat_stretch: 'stretch', cat_miss: 'dazed',
 };
 const SPRITE_BOX = { cat: [40, 40], ball: [10, 10], box_base: [40, 22], box_lid: [44, 7] };
@@ -857,15 +859,15 @@ const ROOM_LVL = {
   minX: 14, maxX: RW - 14, jump: 228,
 };
 const MEMS = [
-  { id: 'tray',   x: 31,  y: RF, dur: 5 },    // khay vệ sinh
-  { id: 'balls',  x: 92,  y: RF, dur: 5.5 },  // bóng lăn ra từ gầm tủ
+  { id: 'tray',   x: 31,  y: RF, dur: 7 },    // khay vệ sinh: ngồi, quay lại cào cát, nhảy ra
+  { id: 'balls',  x: 160, y: RF, dur: 7.4 },  // hất quả bóng rồi đuổi theo
   { id: 'clock',  x: 108, y: 94, dur: 6.5 },  // ngồi trên mặt tủ, nhìn đồng hồ chờ chủ về
   { id: 'stove',  x: 134, y: 94, dur: 6 },    // nằm sưởi cạnh bếp
-  { id: 'fridge', x: 31,  y: 52, dur: 6 },    // nóc tủ lạnh, sữa chua và kem
+  { id: 'fridge', x: 106, y: RF, dur: 15 },   // chủ ra mở tủ lạnh, quỳ xuống cho Đụt ăn
 ];
 const ICONS = {
   tray:   { p: ['.......', '..sss..', '.sssss.', 'ddddddd', 'd.....d', '.ddddd.'], c: { s: '#ead9b2', d: '#5d6a82' } },
-  balls:  { p: ['..rr...', '.rwrr..', '.rrrr..', '..rr.bb', '.....bb'], c: { r: '#ee6262', w: '#ffffff', b: '#5c9cec' } },
+  balls:  { p: ['..rrr..', '.rwrrr.', '.rwrrr.', '.rrrrr.', '..rrr..'], c: { r: '#ee6262', w: '#ffffff' } },
   clock:  { p: ['.kkkkk.', 'kwwkwwk', 'kwwkwwk', 'kwwkkkk', 'kwwwwwk', '.kkkkk.'], c: { k: '#3a3440', w: '#f8f6f0' } },
   stove:  { p: ['...o...', '..ooo..', '.oyoyo.', '.oyyyo.', '..ooo..', 'kkkkkkk'], c: { o: '#ff9a4a', y: '#ffe08a', k: '#3a3440' } },
   fridge: { p: ['..ppp..', '.ppwpp.', '.ppppp.', '..ttt..', '..ttt..', '...t...'], c: { p: '#f6a8c8', w: '#ffffff', t: '#e0b070' } },
@@ -892,6 +894,83 @@ function purr(t, dur, v = .08) { // tiếng gừ gừ
 }
 const tick = (t, v = .03) => tone(98, t, .05, { type: 'square', vol: v, cut: 3500 });
 
+/* --- kịch bản chuyển động trong các ký ức --- */
+function kf(keys, t, fn = ease) {
+  if (t <= keys[0][0]) return keys[0][1];
+  for (let i = 0; i < keys.length - 1; i++) {
+    const [t0, v0] = keys[i], [t1, v1] = keys[i + 1];
+    if (t <= t1) return lerp(v0, v1, fn((t - t0) / ((t1 - t0) || 1)));
+  }
+  return keys[keys.length - 1][1];
+}
+function memState(m, k) {
+  const x0 = m.x;
+  if (m.id === 'balls') {   // rình → hất bóng → đuổi → vồ → hất ngược lại → đuổi → ngồi giữ bóng
+    const x = kf([[0, x0], [1, x0], [1.3, x0 + 10], [2.2, x0 + 50], [2.55, x0 + 56], [3, x0 + 56], [4.3, x0 - 16], [4.7, x0 - 22], [5, x0 - 22], [5.95, x0 - 8]], k, u => u);
+    const face = k < 2.85 ? 1 : k < 4.95 ? -1 : 1;
+    let pose, dy = 0;
+    if (k < .75) pose = 'cat_eat';
+    else if (k < .95) pose = 'cat_jump';
+    else if (k < 2.2) pose = 'walk';
+    else if (k < 2.55) { pose = 'cat_jump'; dy = -Math.sin((k - 2.2) / .35 * Math.PI) * 9; }
+    else if (k < 2.85) pose = 'cat_eat';
+    else if (k < 4.3) pose = 'walk';
+    else if (k < 4.7) { pose = 'cat_jump'; dy = -Math.sin((k - 4.3) / .4 * Math.PI) * 9; }
+    else if (k < 4.95) pose = 'cat_eat';
+    else if (k < 5.95) pose = 'walk';
+    else pose = 'cat_sit';
+    return { x, pose, dy, face };
+  }
+  if (m.id === 'tray') {    // nhảy vào khay → ngồi → quay lại cào cát → ngửi → nhảy ra
+    let x = x0, pose = 'cat_sit', dy = 0, face = 1;
+    if (k < .6) { pose = 'cat_jump'; dy = -Math.sin(k / .6 * Math.PI) * 6; }
+    else if (k < 2.6) pose = 'cat_sit';
+    else if (k < 2.9) { pose = 'cat_stand'; face = -1; }
+    else if (k < 5.3) { pose = 'cat_scratch'; face = -1; }
+    else if (k < 5.7) { pose = 'cat_stand'; face = -1; }
+    else if (k < 6.3) { const u = (k - 5.7) / .6; pose = 'cat_jump'; x = lerp(x0, x0 + 30, ease(u)); dy = -Math.sin(u * Math.PI) * 10; }
+    else { pose = 'cat_stand'; x = x0 + 30; }
+    return { x, pose, dy, face };
+  }
+  if (m.id === 'fridge') return { x: x0, pose: k > 9.2 && k < 14 ? 'cat_eat' : 'cat_sit', dy: 0, face: k < 3.6 ? 1 : -1 };
+  return null;
+}
+function ballState(m, k) {
+  const x0 = m.x;
+  const segs = [[0, .9, 15, 15], [.9, 2.0, 15, 70], [2.0, 2.75, 70, 70], [2.75, 3.9, 70, -36], [3.9, 4.85, -36, -36], [4.85, 5.9, -36, 8], [5.9, 99, 8, 8]];
+  for (const [a, b, xa, xb] of segs) if (k < b) {
+    const u = clamp((k - a) / (b - a)), moving = xa !== xb;
+    return { x: x0 + lerp(xa, xb, easeOut(u)), y: RF - (moving ? Math.abs(Math.sin(u * Math.PI * 3)) * 5 * (1 - u) : (k < .9 ? Math.abs(Math.sin(k * 9)) * .8 : 0)) };
+  }
+}
+/* người trong ký ức tủ lạnh: từ cửa phòng ngủ → tủ lạnh → quỳ xuống cho Đụt ăn */
+const PERSON_HANDS = { 6: [31, 43], 7: [35, 66], 8: [38, 74] };
+function personState(k) {
+  const X1 = 258, XF = 66, XK = 84;
+  if (k < 1) return { x: X1, col: 4, face: -1 };
+  if (k < 5.6) { const x = lerp(X1, XF, (k - 1) / 4.6); return { x, col: Math.floor((X1 - x) / 6) & 3, face: -1 }; }
+  if (k < 6.4) return { x: XF, col: 5, face: -1 };
+  if (k < 7.4) return { x: XF, col: 6, face: -1 };
+  if (k < 7.8) return { x: XF, col: 6, face: 1 };
+  if (k < 8.4) return { x: lerp(XF, XK, ease((k - 7.8) / .6)), col: 6, face: 1 };
+  if (k < 9) return { x: XK, col: 7, face: 1 };
+  return { x: XK, col: 8, face: 1 };
+}
+function drawPerson(row, col, cx, bottom, face) {
+  drawImg(IMG.people_sheet, col * 40, row * 84, 40, 84, cx, bottom, [40, 84], { sx: face });
+}
+function drawTreat(kind, x, y, level) { // x: giữa, y: đáy
+  x = Math.round(x); y = Math.round(y);
+  if (kind === 'yogurt') {
+    rect(x - 3, y - 6, 7, 6, '#2a2230'); rect(x - 2, y - 5, 5, 5, '#ffffff'); rect(x - 2, y - 2, 5, 1, '#f0d0e0');
+    const h = Math.round(3 * level); if (h > 0) rect(x - 2, y - 2 - h, 5, h, '#f6a8c8');
+  } else {
+    rect(x - 1, y - 4, 3, 4, '#c8954e'); rect(x - 2, y - 5, 5, 2, '#e0b070'); rect(x, y - 1, 1, 1, '#a87a3a');
+    const h = Math.max(0, Math.round(4 * level));
+    if (h > 0) { rect(x - 2, y - 5 - h, 5, h, '#f6a8c8'); rect(x - 1, y - 6 - h, 3, 1, '#f6a8c8'); rect(x - 1, y - 5 - h, 1, 1, '#ffffff'); }
+  }
+}
+
 function enterRoom() {
   const t = nowA();
   S = { t0: t, cat: newCat(122, RF), cam: 0, mems: MEMS.map(m => ({ ...m, done: false })), cur: null, curT: 0,
@@ -912,15 +991,32 @@ function roomMusic() {
 function startMem(m, t) {
   S.cur = m; S.curT = t;
   const c = S.cat; c.vx = 0;
-  c.face = m.id === 'tray' || m.id === 'fridge' ? 1 : 1;
-  if (m.id === 'tray') { for (let i = 0; i < 10; i++) at(t + .4 + i * .22 + (i > 4 ? .5 : 0), tt => scratch(tt)); }
-  if (m.id === 'balls') { [0, 2, 4, 3, 2, 4, 5].forEach((d, i) => at(t + .5 + i * .55, tt => pluck(SCALE[d], tt, .12))); }
+  if (m.id === 'tray') {
+    at(t + .55, tt => thump(tt, .1));
+    at(t + 6.25, tt => thump(tt, .12));
+  }
+  if (m.id === 'balls') {
+    S.ballImg = BALL_NAMES[Math.floor(Math.random() * 5)];
+    [[.9, 76], [2.75, 79], [4.85, 81]].forEach(([d, n]) => at(t + d, tt => pluck(n, tt, .14)));
+    [2.55, 4.7].forEach(d => at(t + d, tt => thump(tt, .1)));
+    at(t + 6.2, tt => meow(tt, .05));
+  }
   if (m.id === 'clock') {
     for (let i = 0; i < 26; i++) at(t + .3 + 4.6 * Math.pow(i / 26, .7), tt => tick(tt));
     at(t + 5, tt => { musicbox(72, tt, .1); musicbox(79, tt + .15, .1); meow(tt + .4, .06); });
   }
   if (m.id === 'stove') { at(t + .5, tt => purr(tt, 5.2)); at(t + .3, tt => pad([64, 67, 72], tt, 5, .03)); }
-  if (m.id === 'fridge') { at(t + .6, tt => sweep(tt)); at(t + 2, tt => { musicbox(84, tt, .08); musicbox(88, tt + .2, .08); }); at(t + 3.4, tt => meow(tt, .06)); }
+  if (m.id === 'fridge') {
+    S.who = Math.random() < .5 ? 0 : 1;                       // 0: nữ, 1: nam
+    S.treat = Math.random() < .5 ? 'yogurt' : 'icecream';
+    at(t + .2, tt => sweep(tt));
+    for (let i = 0; i < 10; i++) at(t + 1.1 + i * .46, tt => tone(52, tt, .08, { type: 'sine', vol: .05 }));   // tiếng bước chân
+    at(t + 3.8, tt => meow(tt, .06));
+    at(t + 5.95, tt => { tone(60, tt, .3, { type: 'sine', vol: .04 }); musicbox(84, tt + .1, .07); });
+    at(t + 6.6, tt => musicbox(88, tt, .08));
+    at(t + 8.6, tt => meow(tt, .06));
+    at(t + 9.5, tt => purr(tt, 4.6, .08));
+  }
 }
 function updateRoom(dt) {
   const t = nowA(), c = S.cat;
@@ -931,9 +1027,20 @@ function updateRoom(dt) {
   });
   if (S.cur) {
     const m = S.cur, k = t - S.curT;
-    c.x += (m.x - c.x) * Math.min(1, dt * 5);
-    if (m.id === 'tray' && Math.random() < dt * 8 && k < 3) burst(c.x + (Math.random() - .5) * 12, RF - 4, 2, ['#ead9b2', '#d8c49a'], 20, .5, 60);
-    if (m.id === 'tray' && k > 2.6) { const n = Math.floor((k - 2.6) * 4); while (S.prints.length < Math.min(n, 9)) S.prints.push({ x: m.x + 18 + S.prints.length * 11, t }); }
+    const st = memState(m, k);
+    if (st) { const nx = st.x; c.dist += Math.abs(nx - c.x); c.x = nx; c.face = st.face; c.y = m.y; c.vy = 0; c.on = true; S.memPose = st; }
+    else { c.x += (m.x - c.x) * Math.min(1, dt * 5); S.memPose = null; }
+    c.fs += (c.face - c.fs) * Math.min(1, dt * 14);
+    if (m.id === 'tray' && k > 2.9 && k < 5.3) {   // mỗi lần chân gạt xuống: cát bắn về phía trước, có tiếng sột soạt
+      const fr = Math.floor(t * SHEET.anims.scratch.fps) % 4;
+      if (fr === 2 && S.lastFr !== 2) {
+        for (let i = 0; i < 7; i++) parts.push({ x: c.x + c.face * (15 + Math.random() * 3), y: RF - 8, vx: c.face * (15 + Math.random() * 30), vy: -20 - Math.random() * 30,
+          life: .6, max: .6, c: ['#ead9b2', '#d8c49a', '#f2e4c2'][i % 3], g: 120 });
+        scratch(t, .07);
+      }
+      S.lastFr = fr;
+    }
+    if (m.id === 'tray' && k > 6.3) { const n = Math.floor((k - 6.3) * 5); while (S.prints.length < Math.min(n, 7)) S.prints.push({ x: m.x + 42 + S.prints.length * 11, t }); }
     if (k > m.dur) {
       m.done = true; S.cur = null; S.doneN++;
       S.flying.push({ id: m.id, t, x: c.x - S.cam, y: c.y - 24, slot: S.doneN - 1 });
@@ -946,7 +1053,9 @@ function updateRoom(dt) {
   if (S.exit) { c.x = Math.min(RW - 18, c.x + 22 * dt); c.vx = 22; c.dist += 22 * dt; }
   if (S.exit && t - S.exit > 1.8 && !nextScene) go('valley', '#fff6e4');
   S.prints = S.prints.filter(p => t - p.t < 8);
-  const target = clamp(c.x - W / 2 + c.vx * .3, 0, RW - W);
+  let focus = c.x + c.vx * .3;
+  if (S.cur && S.cur.id === 'fridge') { const k = t - S.curT; if (k < 8) focus = personState(k).x; }
+  const target = clamp(focus - W / 2, 0, RW - W);
   S.cam += (target - S.cam) * Math.min(1, dt * 2.5);
 }
 
@@ -986,7 +1095,7 @@ function drawRoom() {
   hand(ck, cy, ha, 4, '#3a3440'); hand(ck, cy, ma, 6, '#c0504a'); rect(ck, cy, 1, 1, '#25212b');
   // ---- tủ lạnh ----
   const fx = X(10), fy = 52, fw = 42, fh = RF - 52;
-  const fopen = m && m.id === 'fridge' ? ease(clamp((mk - .5) / .8)) * (1 - ease(clamp((mk - 4.8) / .8))) : 0;
+  const fopen = m && m.id === 'fridge' ? ease(clamp((mk - 5.9) / .5)) * (1 - ease(clamp((mk - 7) / .6))) : 0;
   rect(fx, fy, fw, fh, '#b597b0'); rect(fx + 1, fy + 1, fw - 2, fh - 1, '#ead5e5');
   rect(fx + 1, fy + 1, fw - 2, 1, '#f8eaf4'); rect(fx + fw - 4, fy + 1, 3, fh - 1, '#dcc2d6');
   rect(fx + 1, fy + 26, fw - 2, 1, '#b597b0');
@@ -1028,7 +1137,8 @@ function drawRoom() {
   }
   // ---- cửa phòng ngủ ----
   const dx = X(234), dy = 52, dW = 42, dH = RF - 52;
-  const dopen = S.doorT ? ease(clamp((t - S.doorT) / 1.4)) : 0;
+  const memDoor = m && m.id === 'fridge' ? ease(clamp(mk / .9)) * (1 - ease(clamp((mk - 13.8) / 1))) * .9 : 0;
+  const dopen = Math.max(S.doorT ? ease(clamp((t - S.doorT) / 1.4)) : 0, memDoor);
   if (dopen > 0) {
     rect(dx, dy, dW, dH, '#fff4d6');
     glow(dx + dW / 2, dy + dH / 2, 70, [255, 230, 170], .55 * dopen);
@@ -1055,13 +1165,25 @@ function drawRoom() {
   rect(X(218), RF - 4, 12, 4, '#4a7cc0'); rect(X(217), RF - 5, 14, 1, '#6aa0d8'); rect(X(219), RF - 6, 3, 1, '#9a6a3a'); rect(X(223), RF - 6, 2, 1, '#b07a44'); rect(X(226), RF - 6, 2, 1, '#9a6a3a');
   // ---- dấu chân cát (ký ức khay vệ sinh) ----
   S.prints.forEach(p => { const a = clamp(1 - (t - p.t) / 8) * .8; paw(X(p.x), RF - 3, '#c8b088', a * .9); });
-  // ---- bóng lăn ra (ký ức chơi bóng) ----
+  // ---- một quả bóng (ký ức chơi bóng) ----
   if (m && m.id === 'balls') {
-    [[0, 70], [1, 112], [2, 128]].forEach(([i, tx2], j) => {
-      const u = clamp((mk - .4 - j * .35) / 1.2), x = lerp(150, tx2, easeOut(u));
-      const y = RF - Math.abs(Math.sin(u * Math.PI * 2.5)) * 10 * (1 - u) - (mk > 2 ? Math.abs(Math.sin((mk - 2) * 3 + j)) * 6 * clamp((m.dur - .5 - mk)) : 0);
-      spr(BALL_NAMES[i * 2 % 5], X(x), y, SPRITE_BOX.ball, { alpha: clamp((m.dur - mk) * 2) });
-    });
+    const b = ballState(m, mk);
+    shadow(X(b.x), RF, RF - b.y, .2);
+    spr(S.ballImg || 'ball_red', X(b.x), b.y, SPRITE_BOX.ball, { alpha: clamp((m.dur - mk) * 2) });
+  }
+  // ---- người trong ký ức tủ lạnh ----
+  if (m && m.id === 'fridge') {
+    const p = personState(mk), a = clamp(mk * 3) * clamp((m.dur - mk) * 1.5);
+    ctx.globalAlpha = a;
+    shadow(X(p.x), RF, 0, .25);
+    drawPerson(S.who, p.col, X(p.x), RF + 1, p.face);
+    if (mk > 6.6 && PERSON_HANDS[p.col]) {
+      const [hx, hy] = PERSON_HANDS[p.col];
+      const ix = X(p.x) - 20 + (p.face > 0 ? hx : 40 - hx), iy = RF + 1 - 84 + hy;
+      drawTreat(S.treat, ix, iy, 1 - clamp((mk - 9.4) / 4.4));
+      if (mk > 9.4 && mk < 13.8 && Math.random() < .12) burst(p.x - 20 + hx, iy - 3, 1, ['#ffd0e8', '#ffffff'], 10, .5, 20);
+    }
+    ctx.globalAlpha = 1;
   }
   // ---- chỗ có ký ức: dấu chân phát sáng ----
   S.mems.forEach((mm, i) => {
@@ -1075,10 +1197,9 @@ function drawRoom() {
   let pose = null, dyc = 0;
   if (m) {
     pose = 'cat_sit';
-    if (m.id === 'balls' && mk > 1.6 && mk < m.dur - .6) { const ph = (mk - 1.6) % 1; pose = ph < .45 ? 'cat_pounce' : 'cat_sit'; dyc = -Math.sin(clamp(ph / .45) * Math.PI) * 5; }
+    if (S.memPose) { pose = S.memPose.pose === 'walk' ? WALK4[Math.floor(c.dist / 4) & 3] : S.memPose.pose; dyc = S.memPose.dy; }
     if (m.id === 'stove') pose = mk < 1.5 ? 'cat_lie' : (mk < m.dur - .7 ? 'cat_lie_blink' : 'cat_lie');
     if (m.id === 'clock' && mk > 5.2) pose = 'cat_stand';
-    if (m.id === 'fridge' && mk > 2.9 && mk < 5.3) pose = 'cat_eat';
   }
   if (S.exit) pose = WALK4[Math.floor(c.dist / 5) & 3];
   glow(X(c.x), c.y - 10, 18, [255, 220, 200], .12);
@@ -1088,23 +1209,10 @@ function drawRoom() {
     const u = ((mk * .5 + i / 3) % 1); ctx.globalAlpha = (1 - u) * .7;
     const r = 1 + Math.round(u * 2); pixRing(X(c.x + 10 + u * 6), c.y - 22 - u * 16, r, '#ffffff', (1 - u) * .7);
   }
-  // sữa chua và kem bay lên; hũ sữa chua đáp xuống trước mặt Đụt
-  if (m && m.id === 'fridge' && mk > 1.2) {
-    const u = easeOut(clamp((mk - 1.2) / 1.3)), a = clamp((m.dur - .4 - mk) * 1.5);
-    const yy = lerp(110, 38, u) + Math.sin(t * 2.4) * 1.5;
-    const land = ease(clamp((mk - 2.4) / .5));
-    const ax = X(lerp(54, 46, land)), ay = lerp(yy, 45, land);
-    const eaten = clamp((mk - 3) / 2.2);
-    ctx.globalAlpha = a;
-    rect(ax, ay, 7, 7, '#ffffff'); rect(ax, ay + 1 + Math.round(eaten * 3), 7, 2 - Math.round(eaten * 1.5), '#f6a8c8');
-    rect(ax, ay, 7, 1, '#e8e0ea'); rect(ax + 1, ay + 5, 5, 1, '#f0d0e0'); // hũ sữa chua
-    const bx2 = X(60), by2 = yy + 4 + Math.sin(t * 2.4 + 1) * 1.5;
-    rect(bx2, by2 - 6, 7, 5, '#f6a8c8'); rect(bx2 + 1, by2 - 7, 5, 1, '#f6a8c8'); rect(bx2 + 2, by2 - 6, 2, 1, '#ffffff'); // kem
-    rect(bx2 + 1, by2 - 1, 5, 2, '#e0b070'); rect(bx2 + 2, by2 + 1, 3, 2, '#e0b070'); rect(bx2 + 3, by2 + 3, 1, 1, '#c8954e');
-    ctx.globalAlpha = 1;
-    glow(X(56), yy + 2, 14, [255, 220, 240], .4 * a * (1 - land * .5));
-    if (Math.random() < .3) burst(56 + (Math.random() - .5) * 16, yy, 1, ['#ffffff', '#ffd0e8'], 10, .6, -10);
-    if (mk > 3 && mk < 5.2 && Math.random() < .15) burst(44, 46, 1, ['#ffd0e8', '#ffffff'], 12, .5, 30);
+  // tim nhỏ khi được cho ăn
+  if (m && m.id === 'fridge' && mk > 10 && mk < 14.2) for (let i = 0; i < 2; i++) {
+    const u = ((mk - 10) * .45 + i * .5) % 1;
+    heart(X(c.x) - 4 + i * 8 + Math.round(Math.sin(u * 6) * 2), Math.round(c.y - 34 - u * 16), '#f07a90', clamp(Math.min(u * 5, (1 - u) * 2)));
   }
   // bụi nắng
   for (let i = 0; i < 18; i++) {
